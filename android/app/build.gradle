@@ -1,6 +1,12 @@
+import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.google.gms.google-services"
+
+// Package the font used by MaterialCommunityIcons on Android.
+apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -52,6 +58,11 @@ react {
 
     /* Autolinking */
     autolinkLibrariesWithApp()
+}
+
+googleServices {
+    // Keep local builds working until android/app/google-services.json is added.
+    missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN
 }
 
 /**

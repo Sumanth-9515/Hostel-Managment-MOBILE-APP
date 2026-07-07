@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "762377993352",
+    "project_id": "nilayam-ba8b9",
+    "storage_bucket": "nilayam-ba8b9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:762377993352:android:5623c29fba0b1e5886b33d",
+        "android_client_info": {
+          "package_name": "com.hostelappmanagementsystem"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC196vPc5o0o3tPgy9lXtJFp6Pv8fqtSoE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
