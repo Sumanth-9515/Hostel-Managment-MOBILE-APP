@@ -10,6 +10,7 @@ import AddHostelScreen from '../screens/user/AddHostelScreen';
 import AddCandidateScreen from '../screens/user/AddCandidateScreen';
 import CandidatesScreen from '../screens/user/CandidatesScreen';
 import RentManagementScreen from '../screens/user/RentManagementScreen';
+import RevenueOverviewScreen from '../screens/user/RevenueOverviewScreen';
 import TenantDetailsScreen from '../screens/user/TenantDetailsScreen';
 import OnboardingScreen from '../screens/user/OnboardingScreen';
 import ActivityLogsScreen from '../screens/user/ActivityLogsScreen';
@@ -44,6 +45,7 @@ export default function UserNavigator({ onLogout, onUserUpdate, user }) {
           <Stack.Screen name="Candidates">{props => <CandidatesScreen {...props} onLogout={onLogout} />}</Stack.Screen>
           <Stack.Screen name="TenantDetails">{props => <TenantDetailsScreen {...props} onLogout={onLogout} />}</Stack.Screen>
           <Stack.Screen name="OwnerSearch">{props => <OwnerSearchScreen {...props} onLogout={onLogout} />}</Stack.Screen>
+          <Stack.Screen name="RevenueOverview">{props => <RevenueOverviewScreen {...props} onLogout={onLogout} />}</Stack.Screen>
           <Stack.Screen name="Overview">{props => <OverviewScreen {...props} onLogout={onLogout} />}</Stack.Screen>
           <Stack.Screen name="ActivityLogs">{props => <ActivityLogsScreen {...props} onLogout={onLogout} />}</Stack.Screen>
           <Stack.Screen name="Profile">{props => <ProfileScreen {...props} onLogout={onLogout} onUserUpdate={onUserUpdate} />}</Stack.Screen>

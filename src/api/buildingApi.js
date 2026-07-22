@@ -1,14 +1,15 @@
 import api from './client';
+import { resilientGet } from './apiHelpers';
 
 export const buildingApi = {
-  list: () => api.get('/buildings').then(r => r.data),
-  get: id => api.get(`/buildings/${id}`).then(r => r.data),
+  list: () => resilientGet('/buildings').then(r => r.data),
+  get: id => resilientGet(`/buildings/${id}`).then(r => r.data),
   create: payload => api.post('/buildings', payload).then(r => r.data),
   update: (id, payload) => api.put(`/buildings/${id}`, payload).then(r => r.data),
   remove: id => api.delete(`/buildings/${id}`).then(r => r.data),
-  bedUsage: () => api.get('/buildings/plan/bed-usage').then(r => r.data),
-  overview: () => api.get('/buildings/stats/overview').then(r => r.data),
-  searchRoom: roomNumber => api.get('/buildings/search/room', { params: { roomNumber } }).then(r => r.data),
+  bedUsage: () => resilientGet('/buildings/plan/bed-usage').then(r => r.data),
+  overview: () => resilientGet('/buildings/stats/overview').then(r => r.data),
+  searchRoom: roomNumber => resilientGet('/buildings/search/room', { params: { roomNumber } }).then(r => r.data),
   addFloor: (buildingId, payload) => api.post(`/buildings/${buildingId}/floors`, payload).then(r => r.data),
   updateFloor: (buildingId, floorId, payload) => api.put(`/buildings/${buildingId}/floors/${floorId}`, payload).then(r => r.data),
   deleteFloor: (buildingId, floorId) => api.delete(`/buildings/${buildingId}/floors/${floorId}`).then(r => r.data),
@@ -16,5 +17,5 @@ export const buildingApi = {
   updateRoom: (buildingId, floorId, roomId, payload) => api.put(`/buildings/${buildingId}/floors/${floorId}/rooms/${roomId}`, payload).then(r => r.data),
   deleteRoom: (buildingId, floorId, roomId) => api.delete(`/buildings/${buildingId}/floors/${floorId}/rooms/${roomId}`).then(r => r.data),
   availableBeds: (buildingId, floorId, roomId) =>
-    api.get(`/buildings/${buildingId}/floors/${floorId}/rooms/${roomId}/available-beds`).then(r => r.data),
+    resilientGet(`/buildings/${buildingId}/floors/${floorId}/rooms/${roomId}/available-beds`).then(r => r.data),
 };

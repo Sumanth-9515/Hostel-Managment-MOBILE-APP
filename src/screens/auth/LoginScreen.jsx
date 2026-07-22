@@ -39,7 +39,7 @@ export default function LoginScreen({ navigation, onAuth }) {
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
-    masterApi.plans().then(setPlans).catch(() => {});
+    masterApi.plans().then(setPlans).catch(() => { });
   }, []);
 
   const submit = async () => {
@@ -71,7 +71,7 @@ export default function LoginScreen({ navigation, onAuth }) {
     }
   };
 
-  const callAdmin = () => { setHelpOpen(false); Linking.openURL(`tel:${HELP_PHONE}`).catch(() => {}); };
+  const callAdmin = () => { setHelpOpen(false); Linking.openURL(`tel:${HELP_PHONE}`).catch(() => { }); };
   const whatsappAdmin = () => {
     setHelpOpen(false);
     Linking.openURL(`https://wa.me/91${HELP_PHONE}?text=${encodeURIComponent(HELP_MESSAGE)}`).catch(() => Alert.alert('WhatsApp', 'Unable to open WhatsApp.'));
@@ -160,7 +160,7 @@ export default function LoginScreen({ navigation, onAuth }) {
           <View style={styles.flexSpacer} />
 
           <Pressable onPress={() => setHelpOpen(true)}>
-            <Text style={styles.footer}>Need help? Contact Hostel Administration</Text>
+            <Text style={styles.footer}>Need help? Contact App Support</Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoid>
@@ -168,9 +168,9 @@ export default function LoginScreen({ navigation, onAuth }) {
       {/* Help / contact admin popup */}
       <Modal visible={helpOpen} transparent animationType="fade" onRequestClose={() => setHelpOpen(false)}>
         <Pressable style={styles.helpBackdrop} onPress={() => setHelpOpen(false)}>
-          <Pressable style={styles.helpCard} onPress={() => {}}>
+          <Pressable style={styles.helpCard} onPress={() => { }}>
             <View style={styles.helpIcon}><Icon name="headset" size={26} color={theme.teal} /></View>
-            <Text style={styles.helpTitle}>Contact Hostel Administration</Text>
+            <Text style={styles.helpTitle}>Contact App Support</Text>
             <Text style={styles.helpNumber}>+91 {HELP_PHONE}</Text>
 
             <Pressable style={[styles.helpOption, styles.helpCall]} onPress={callAdmin}>

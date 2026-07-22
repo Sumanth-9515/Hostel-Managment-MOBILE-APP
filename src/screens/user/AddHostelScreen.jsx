@@ -7,7 +7,6 @@ import AppHeader from '../../components/AppHeader';
 import AppInput from '../../components/AppInput';
 import EmptyState from '../../components/EmptyState';
 import KeyboardAvoid from '../../components/KeyboardAvoid';
-import ScreenSkeleton from '../../components/Skeleton';
 import { useSidebar } from '../../components/Sidebar';
 import { buildingApi } from '../../api/buildingApi';
 import { tenantApi } from '../../api/tenantApi';
@@ -24,6 +23,12 @@ const counts = building => {
   const rooms = floors.flatMap(floor => floor.rooms || []);
   const beds = rooms.flatMap(room => room.beds || []);
   return { floors: floors.length, rooms: rooms.length, beds: beds.length, occupied: beds.filter(bed => bed.status === 'Occupied').length };
+};
+
+const hostelCache = {
+  hasData: false,
+  buildings: [],
+  usage: null,
 };
 
 function Sheet({ visible, title, subtitle, icon, onClose, children, tall = false }) {
@@ -83,11 +88,52 @@ function IconAction({ icon, color, onPress, label }) {
   return <Pressable accessibilityLabel={label} style={styles.iconAction} onPress={event => { event.stopPropagation(); onPress(); }}><Icon name={icon} size={18} color={color} /></Pressable>;
 }
 
+function HostelDataSkeleton() {
+  return (
+    <View pointerEvents="none">
+      <View style={styles.usage}>
+        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+          <View style={[styles.skeletonBlock, { width: 19, height: 19 }]} />
+          <View style={styles.flex}>
+            <View style={[styles.skeletonBlock, { width: '50%', height: 12 }]} />
+            <View style={[styles.skeletonBlock, { width: '40%', height: 10, marginTop: 4 }]} />
+          </View>
+          <View style={[styles.skeletonBlock, { width: 28, height: 14 }]} />
+        </View>
+        <View style={[styles.skeletonBlock, { width: '100%', height: 5, borderRadius: 6, marginTop: 8 }]} />
+      </View>
+      <View style={styles.stats}>
+        {[0, 1, 2, 3].map(i => (
+          <View key={i} style={styles.statItem}>
+            <View style={[styles.skeletonBlock, { width: 30, height: 18 }]} />
+            <View style={[styles.skeletonBlock, { width: 44, height: 9, marginTop: 4 }]} />
+          </View>
+        ))}
+      </View>
+      <View style={styles.divider} />
+      <View style={[styles.skeletonBlock, { width: 100, height: 16, marginBottom: 8 }]} />
+      {[0, 1].map(i => (
+        <View key={i} style={styles.propertyCard}>
+          <View style={styles.propertyTop}>
+            <View style={[styles.skeletonBlock, { width: 36, height: 36, borderRadius: 16 }]} />
+            <View style={styles.flex}>
+              <View style={[styles.skeletonBlock, { width: '50%', height: 14 }]} />
+              <View style={[styles.skeletonBlock, { width: '40%', height: 10, marginTop: 4 }]} />
+            </View>
+          </View>
+          <View style={[styles.skeletonBlock, { width: '60%', height: 11, marginTop: 9 }]} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export default function AddHostelScreen({ onLogout }) {
   const { open } = useSidebar();
-  const [loading, setLoading] = useState(true);
-  const [buildings, setBuildings] = useState([]);
-  const [usage, setUsage] = useState(null);
+  const [dataLoading, setDataLoading] = useState(!hostelCache.hasData);
+  const [dataError, setDataError] = useState(null);
+  const [buildings, setBuildings] = useState(hostelCache.buildings);
+  const [usage, setUsage] = useState(hostelCache.usage);
   const [building, setBuilding] = useState(null);
   const [floor, setFloor] = useState(null);
   const [room, setRoom] = useState(null);
@@ -102,9 +148,18 @@ export default function AddHostelScreen({ onLogout }) {
   const [planInfo, setPlanInfo] = useState(null);
   const [overflowBuilding, setOverflowBuilding] = useState(null);
 
-  const refresh = useCallback(async () => {
+  const hasLoadedRef = useRef(hostelCache.hasData);
+  const loadRequestRef = useRef(0);
+
+  const refresh = useCallback(async (options = {}) => {
+    const requestId = ++loadRequestRef.current;
+    if (!options.background) {
+      setDataLoading(true);
+    }
+    setDataError(null);
     try {
       const [list, bedUsage] = await Promise.all([buildingApi.list(), buildingApi.bedUsage().catch(() => null)]);
+      if (requestId !== loadRequestRef.current) return;
       const safeList = Array.isArray(list) ? list : [];
       setBuildings(safeList);
       setUsage(bedUsage);
@@ -117,12 +172,25 @@ export default function AddHostelScreen({ onLogout }) {
           if (freshFloor && room?._id) setRoom(freshFloor.rooms?.find(item => item._id === room._id) || null);
         }
       }
+
+      hostelCache.hasData = true;
+      hostelCache.buildings = safeList;
+      hostelCache.usage = bedUsage;
     } catch (error) {
-      Alert.alert('Hostel error', getMessage(error));
-    } finally { setLoading(false); }
+      if (requestId === loadRequestRef.current) {
+        setDataError(getMessage(error));
+      }
+    } finally {
+      if (requestId === loadRequestRef.current) {
+        setDataLoading(false);
+      }
+    }
   }, [building?._id, floor?._id, room?._id]);
 
-  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+  useFocusEffect(useCallback(() => {
+    refresh({ background: hasLoadedRef.current || hostelCache.hasData })
+      .then(() => { hasLoadedRef.current = true; });
+  }, [refresh]));
 
   const totals = useMemo(() => buildings.reduce((sum, item) => {
     const c = counts(item);
@@ -208,52 +276,63 @@ export default function AddHostelScreen({ onLogout }) {
     } catch (error) { Alert.alert('Tenant details', getMessage(error)); }
   };
 
-  if (loading) return <ScreenSkeleton header stats={4} cards={2} />;
+  const hasData = hostelCache.hasData;
+  const showSkeleton = dataLoading && !hasData;
+  const showError = !!dataError && !dataLoading && !hasData;
+
   const pct = usage?.bedLimit ? Math.min(100, Math.round((usage.usedBeds / usage.bedLimit) * 100)) : 0;
 
   return (
     <View style={styles.screen}>
       <AppHeader title="My Hostels" subtitle="Buildings, floors, rooms and beds" onMenu={open} onLogout={onLogout} showOnboardingNotifications />
-      <FlatList data={buildings} keyExtractor={item => item._id} contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}
-        ListHeaderComponent={<>
-          {usage?.bedLimit != null ? <View style={[styles.usage, usage.remainingBeds === 0 && styles.usageFull]}>
-            <View style={styles.row}><Icon name="bed-outline" size={19} color={usage.remainingBeds === 0 ? colors.danger : colors.primary} /><View style={styles.flex}><Text style={styles.usageTitle}>{usage.remainingBeds === 0 ? 'Bed limit reached' : `${usage.remainingBeds} beds remaining`}</Text><Text style={styles.muted}>{usage.usedBeds} of {usage.bedLimit} beds used</Text></View><Text style={[styles.usagePct, usage.remainingBeds === 0 && styles.limitPct]}>{pct}%</Text></View>
-            <View style={styles.track}><View style={[styles.fill, { width: `${pct}%`, backgroundColor: usage.remainingBeds === 0 ? colors.danger : colors.primary }]} /></View>
-          </View> : null}
-          <View style={styles.stats}><StatItem label="Buildings" value={totals.buildings} /><StatItem label="Floors" value={totals.floors} /><StatItem label="Rooms" value={totals.rooms} /><StatItem label="Beds" value={totals.beds} /></View>
-          <View style={styles.divider} />
-          <View style={styles.sectionHead}><View><Text style={styles.heading}>Properties</Text><Text style={styles.muted}>Tap any building to manage floors, rooms and beds</Text></View></View>
-        </>}
-        ListEmptyComponent={<EmptyState title="No buildings yet" message="Create your first hostel building." icon="office-building-outline" />}
-        renderItem={({ item }) => { const c = counts(item); const menuOpen = overflowBuilding?._id === item._id; return <Pressable style={styles.propertyCard} onPress={() => openBuildingDetails(item)}>
-          <View style={styles.propertyTop}><View style={styles.buildingIcon}><Icon name="office-building" size={19} color={colors.primary} /></View><View style={styles.flex}><Text style={styles.buildingName}>{item.buildingName}</Text><Text style={styles.muted} numberOfLines={1}>{item.address || 'No address'}</Text></View><Pressable accessibilityLabel="Building actions" style={styles.moreButton} onPress={event => { event.stopPropagation(); setOverflowBuilding(menuOpen ? null : item); }}><Icon name="dots-horizontal" size={20} color={colors.muted} /></Pressable></View>
-          <Text style={styles.metadata}>{c.floors} Floors • {c.rooms} Rooms • {c.beds} Beds • {c.occupied} Occupied</Text>
-          <View style={styles.cardFoot}><Text style={styles.viewDetails}>View Details →</Text></View>
-          {menuOpen ? <View style={styles.overflowMenu}><Pressable style={styles.menuItem} onPress={event => { event.stopPropagation(); openBuildingForm(item); }}><Icon name="pencil-outline" size={17} color={colors.primary} /><Text style={styles.menuText}>Edit</Text></Pressable><Pressable style={styles.menuItem} onPress={event => { event.stopPropagation(); setOverflowBuilding(null); confirmDelete('Delete building?', 'This will delete all floors, rooms and beds.', () => buildingApi.remove(item._id)); }}><Icon name="delete-outline" size={17} color={colors.danger} /><Text style={[styles.menuText, styles.deleteText]}>Delete</Text></Pressable></View> : null}
-        </Pressable>; }}
-        ListFooterComponent={<View style={styles.footerSpace} />}
-      />
+      {showSkeleton ? (
+        <ScrollView contentContainerStyle={styles.body}>
+          <HostelDataSkeleton />
+        </ScrollView>
+      ) : showError ? (
+        <EmptyState title="Unable to load hostels" message={dataError} icon="wifi-alert" />
+      ) : (
+        <FlatList data={buildings} keyExtractor={item => item._id} contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}
+          ListHeaderComponent={<>
+            {usage?.bedLimit != null ? <View style={[styles.usage, usage.remainingBeds === 0 && styles.usageFull]}>
+              <View style={styles.row}><Icon name="bed-outline" size={19} color={usage.remainingBeds === 0 ? colors.danger : colors.primary} /><View style={styles.flex}><Text style={styles.usageTitle}>{usage.remainingBeds === 0 ? 'Bed limit reached' : `${usage.remainingBeds} beds remaining`}</Text><Text style={styles.muted}>{usage.usedBeds} of {usage.bedLimit} beds used</Text></View><Text style={[styles.usagePct, usage.remainingBeds === 0 && styles.limitPct]}>{pct}%</Text></View>
+              <View style={styles.track}><View style={[styles.fill, { width: `${pct}%`, backgroundColor: usage.remainingBeds === 0 ? colors.danger : colors.primary }]} /></View>
+            </View> : null}
+            <View style={styles.stats}><StatItem label="Buildings" value={totals.buildings} /><StatItem label="Floors" value={totals.floors} /><StatItem label="Rooms" value={totals.rooms} /><StatItem label="Beds" value={totals.beds} /></View>
+            <View style={styles.divider} />
+            <View style={styles.sectionHead}><View><Text style={styles.heading}>Properties</Text><Text style={styles.muted}>Tap any building to manage floors, rooms and beds</Text></View></View>
+          </>}
+          ListEmptyComponent={<EmptyState title="No buildings yet" message="Create your first hostel building." icon="office-building-outline" />}
+          renderItem={({ item }) => { const c = counts(item); const menuOpen = overflowBuilding?._id === item._id; return <Pressable style={styles.propertyCard} onPress={() => openBuildingDetails(item)}>
+            <View style={styles.propertyTop}><View style={styles.buildingIcon}><Icon name="office-building" size={19} color={colors.primary} /></View><View style={styles.flex}><Text style={styles.buildingName}>{item.buildingName}</Text><Text style={styles.muted} numberOfLines={1}>{item.address || 'No address'}</Text></View><Pressable accessibilityLabel="Building actions" style={styles.moreButton} onPress={event => { event.stopPropagation(); setOverflowBuilding(menuOpen ? null : item); }}><Icon name="dots-horizontal" size={20} color={colors.muted} /></Pressable></View>
+            <Text style={styles.metadata}>{c.floors} Floors • {c.rooms} Rooms • {c.beds} Beds • {c.occupied} Occupied</Text>
+            <View style={styles.cardFoot}><Text style={styles.viewDetails}>View Details →</Text></View>
+            {menuOpen ? <View style={styles.overflowMenu}><Pressable style={styles.menuItem} onPress={event => { event.stopPropagation(); openBuildingForm(item); }}><Icon name="pencil-outline" size={17} color={colors.primary} /><Text style={styles.menuText}>Edit</Text></Pressable><Pressable style={styles.menuItem} onPress={event => { event.stopPropagation(); setOverflowBuilding(null); confirmDelete('Delete building?', 'This will delete all floors, rooms and beds.', () => buildingApi.remove(item._id)); }}><Icon name="delete-outline" size={17} color={colors.danger} /><Text style={[styles.menuText, styles.deleteText]}>Delete</Text></Pressable></View> : null}
+          </Pressable>; }}
+          ListFooterComponent={<View style={styles.footerSpace} />}
+        />
+      )}
 
       <Sheet visible={!!level} title={level === 'beds' ? `Room ${room?.roomNumber || ''}` : level === 'rooms' ? 'Rooms' : 'Floors'} subtitle={level === 'beds' ? `${room?.shareType || 0}-share bed details` : level === 'rooms' ? `Floor ${floor?.floorNumber || ''}` : building?.buildingName} icon={level === 'beds' ? 'bed-outline' : level === 'rooms' ? 'door-open' : 'layers-outline'} tall onClose={() => setLevel(level === 'beds' ? 'rooms' : level === 'rooms' ? 'floors' : null)}>
         {level === 'floors' ? <>
-        <View style={styles.sheetAction}><AppButton title="Add Floor" icon="plus" onPress={() => openFloorForm(null)} /></View>
-        <ScrollView contentContainerStyle={styles.sheetList}>{(building?.floors || []).length ? [...building.floors].sort((a,b) => a.floorNumber-b.floorNumber).map(item => <Pressable key={item._id} style={styles.listCard} onPress={() => { setFloor(item); setRoom(null); setLevel('rooms'); }}>
-          <View style={styles.listIcon}><Icon name="layers" size={20} color={colors.primary} /></View><View style={styles.flex}><Text style={styles.listTitle}>Floor {item.floorNumber}</Text><Text style={styles.muted}>{item.floorName || `${item.rooms?.length || 0} rooms`}</Text></View><IconAction icon="pencil-outline" color={colors.primary} onPress={() => openFloorForm(item)} /><IconAction icon="delete-outline" color={colors.danger} onPress={() => confirmDelete('Delete floor?', 'All rooms and beds on this floor will be deleted.', () => buildingApi.deleteFloor(building._id, item._id))} /><Icon name="chevron-right" size={21} color={colors.muted} />
-        </Pressable>) : <EmptyState title="No floors available" message="Add a floor to continue." icon="layers-plus" />}</ScrollView>
+          <View style={styles.sheetAction}><AppButton title="Add Floor" icon="plus" onPress={() => openFloorForm(null)} /></View>
+          <ScrollView contentContainerStyle={styles.sheetList}>{(building?.floors || []).length ? [...building.floors].sort((a, b) => a.floorNumber - b.floorNumber).map(item => <Pressable key={item._id} style={styles.listCard} onPress={() => { setFloor(item); setRoom(null); setLevel('rooms'); }}>
+            <View style={styles.listIcon}><Icon name="layers" size={20} color={colors.primary} /></View><View style={styles.flex}><Text style={styles.listTitle}>Floor {item.floorNumber}</Text><Text style={styles.muted}>{item.floorName || `${item.rooms?.length || 0} rooms`}</Text></View><IconAction icon="pencil-outline" color={colors.primary} onPress={() => openFloorForm(item)} /><IconAction icon="delete-outline" color={colors.danger} onPress={() => confirmDelete('Delete floor?', 'All rooms and beds on this floor will be deleted.', () => buildingApi.deleteFloor(building._id, item._id))} /><Icon name="chevron-right" size={21} color={colors.muted} />
+          </Pressable>) : <EmptyState title="No floors available" message="Add a floor to continue." icon="layers-plus" />}</ScrollView>
         </> : null}
 
         {level === 'rooms' ? <>
-        <View style={styles.sheetAction}><AppButton title="Add Room" icon="plus" onPress={() => openRoomForm(null)} /></View>
-        <ScrollView contentContainerStyle={styles.sheetList}>{(floor?.rooms || []).length ? floor.rooms.map(item => { const occupied = item.beds?.filter(b => b.status === 'Occupied').length || 0; return <Pressable key={item._id} style={styles.listCard} onPress={() => { setRoom(item); setLevel('beds'); }}>
-          <View style={styles.listIcon}><Icon name="door" size={20} color={colors.primary} /></View><View style={styles.flex}><Text style={styles.listTitle}>Room {item.roomNumber}</Text><Text style={styles.muted}>{item.shareType}-share · {occupied}/{item.beds?.length || 0} occupied</Text></View><IconAction icon="pencil-outline" color={colors.primary} onPress={() => openRoomForm(item)} /><IconAction icon="delete-outline" color={colors.danger} onPress={() => confirmDelete('Delete room?', 'All beds in this room will be deleted.', () => buildingApi.deleteRoom(building._id, floor._id, item._id))} /><Icon name="chevron-right" size={21} color={colors.muted} />
-        </Pressable>; }) : <EmptyState title="No rooms available" message="Add a room to continue." icon="door-open" />}</ScrollView>
+          <View style={styles.sheetAction}><AppButton title="Add Room" icon="plus" onPress={() => openRoomForm(null)} /></View>
+          <ScrollView contentContainerStyle={styles.sheetList}>{(floor?.rooms || []).length ? floor.rooms.map(item => { const occupied = item.beds?.filter(b => b.status === 'Occupied').length || 0; return <Pressable key={item._id} style={styles.listCard} onPress={() => { setRoom(item); setLevel('beds'); }}>
+            <View style={styles.listIcon}><Icon name="door" size={20} color={colors.primary} /></View><View style={styles.flex}><Text style={styles.listTitle}>Room {item.roomNumber}</Text><Text style={styles.muted}>{item.shareType}-share · {occupied}/{item.beds?.length || 0} occupied</Text></View><IconAction icon="pencil-outline" color={colors.primary} onPress={() => openRoomForm(item)} /><IconAction icon="delete-outline" color={colors.danger} onPress={() => confirmDelete('Delete room?', 'All beds in this room will be deleted.', () => buildingApi.deleteRoom(building._id, floor._id, item._id))} /><Icon name="chevron-right" size={21} color={colors.muted} />
+          </Pressable>; }) : <EmptyState title="No rooms available" message="Add a room to continue." icon="door-open" />}</ScrollView>
         </> : null}
 
         {level === 'beds' ? <>
-        <View style={styles.sheetAction}><AppButton title="Add Bed" icon="bed-outline" onPress={addBed} /></View>
-        <ScrollView contentContainerStyle={styles.bedGrid}>{(room?.beds || []).map(bed => { const occupied = bed.status === 'Occupied'; return <Pressable key={bed._id} style={[styles.bed, occupied ? styles.bedOccupied : styles.bedFree]} onPress={() => openBed(bed)}>
-          <Icon name="bed" size={27} color={occupied ? colors.danger : colors.success} /><Text style={styles.bedTitle}>Bed {bed.bedNumber}</Text><Text style={[styles.bedStatus, { color: occupied ? colors.danger : colors.success }]}>{occupied ? 'Occupied' : 'Available'}</Text>{!occupied ? <Pressable style={styles.removeBed} onPress={() => removeBed(bed)}><Icon name="minus" size={16} color={colors.danger} /></Pressable> : <Text style={styles.tapInfo}>Tap for tenant</Text>}
-        </Pressable>; })}</ScrollView>
+          <View style={styles.sheetAction}><AppButton title="Add Bed" icon="bed-outline" onPress={addBed} /></View>
+          <ScrollView contentContainerStyle={styles.bedGrid}>{(room?.beds || []).map(bed => { const occupied = bed.status === 'Occupied'; return <Pressable key={bed._id} style={[styles.bed, occupied ? styles.bedOccupied : styles.bedFree]} onPress={() => openBed(bed)}>
+            <Icon name="bed" size={27} color={occupied ? colors.danger : colors.success} /><Text style={styles.bedTitle}>Bed {bed.bedNumber}</Text><Text style={[styles.bedStatus, { color: occupied ? colors.danger : colors.success }]}>{occupied ? 'Occupied' : 'Available'}</Text>{!occupied ? <Pressable style={styles.removeBed} onPress={() => removeBed(bed)}><Icon name="minus" size={16} color={colors.danger} /></Pressable> : <Text style={styles.tapInfo}>Tap for tenant</Text>}
+          </Pressable>; })}</ScrollView>
         </> : null}
       </Sheet>
 
@@ -268,7 +347,7 @@ export default function AddHostelScreen({ onLogout }) {
 
       <Sheet visible={!!tenant} title="Tenant Details" subtitle={tenant?.name} icon="account-outline" tall onClose={() => setTenant(null)}>
         <ScrollView contentContainerStyle={styles.form}><View style={styles.tenantHero}><View style={styles.avatar}><Text style={styles.avatarText}>{tenant?.name?.[0]?.toUpperCase()}</Text></View><View><Text style={styles.tenantName}>{tenant?.name}</Text><Text style={styles.muted}>{tenant?.phone}</Text></View></View>
-          {[['Email', tenant?.email], ["Father's Name", tenant?.fatherName], ['Joining Date', dateText(tenant?.joiningDate)], ['Monthly Rent', money(tenant?.rentAmount || 0)], ['Address', tenant?.permanentAddress]].filter(([,v]) => v).map(([label,value]) => <View style={styles.infoRow} key={label}><Text style={styles.infoLabel}>{label}</Text><Text style={styles.infoValue}>{value}</Text></View>)}
+          {[['Email', tenant?.email], ["Father's Name", tenant?.fatherName], ['Joining Date', dateText(tenant?.joiningDate)], ['Monthly Rent', money(tenant?.rentAmount || 0)], ['Address', tenant?.permanentAddress]].filter(([, v]) => v).map(([label, value]) => <View style={styles.infoRow} key={label}><Text style={styles.infoLabel}>{label}</Text><Text style={styles.infoValue}>{value}</Text></View>)}
           <View style={styles.contactRow}><AppButton title="Call" icon="phone" style={styles.contact} onPress={() => Linking.openURL(`tel:${tenant?.phone}`)} /><AppButton title="WhatsApp" icon="whatsapp" style={styles.contact} onPress={() => Linking.openURL(`https://wa.me/91${tenant?.phone?.replace(/\D/g, '')}`)} /></View>
         </ScrollView>
       </Sheet>
@@ -282,12 +361,13 @@ export default function AddHostelScreen({ onLogout }) {
 }
 
 const styles = StyleSheet.create({
-  screen:{flex:1,backgroundColor:colors.bg},body:{padding:16,paddingBottom:0},flex:{flex:1},row:{flexDirection:'row',alignItems:'center',gap:10},muted:{color:colors.muted,fontSize:12,marginTop:2},footerSpace:{height:110},
-  usage:{backgroundColor:colors.surface,borderRadius:16,padding:10,marginBottom:10,shadowColor:'#111827',shadowOpacity:.06,shadowRadius:12,shadowOffset:{width:0,height:6},elevation:2},usageFull:{backgroundColor:colors.dangerSoft},usageTitle:{color:colors.text,fontWeight:'900',fontSize:13},usagePct:{color:colors.primary,fontWeight:'900'},limitPct:{color:colors.danger},track:{height:5,borderRadius:6,backgroundColor:'#e5e7eb',overflow:'hidden',marginTop:8},fill:{height:'100%',borderRadius:6},
-  stats:{flexDirection:'row',backgroundColor:colors.surface,borderRadius:16,paddingVertical:10,paddingHorizontal:8,marginBottom:10,shadowColor:'#111827',shadowOpacity:.06,shadowRadius:12,shadowOffset:{width:0,height:6},elevation:2},statItem:{flex:1,alignItems:'center'},statValue:{fontSize:18,fontWeight:'900',color:colors.primary},statLabel:{fontSize:9,color:colors.muted,fontWeight:'700',marginTop:2},divider:{height:StyleSheet.hairlineWidth,backgroundColor:colors.border,marginBottom:10},sectionHead:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:8},heading:{fontSize:20,fontWeight:'900',color:colors.text},
-  propertyCard:{backgroundColor:colors.surface,borderRadius:16,padding:12,marginBottom:10,shadowColor:'#111827',shadowOpacity:.07,shadowRadius:14,shadowOffset:{width:0,height:7},elevation:2},propertyTop:{flexDirection:'row',alignItems:'center',gap:9},buildingIcon:{width:36,height:36,borderRadius:16,backgroundColor:colors.primarySoft,alignItems:'center',justifyContent:'center'},buildingName:{fontSize:16,fontWeight:'900',color:colors.text},moreButton:{width:34,height:34,borderRadius:16,alignItems:'center',justifyContent:'center',backgroundColor:colors.faint},metadata:{color:colors.muted,fontSize:11,fontWeight:'600',marginTop:9},cardFoot:{marginTop:7,paddingTop:8,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:colors.border},viewDetails:{color:colors.primary,fontSize:12,fontWeight:'900'},overflowMenu:{position:'absolute',right:12,top:48,width:128,backgroundColor:colors.surface,borderRadius:16,paddingVertical:5,shadowColor:'#111827',shadowOpacity:.16,shadowRadius:16,shadowOffset:{width:0,height:8},elevation:8,zIndex:10},menuItem:{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:9,paddingHorizontal:12},menuText:{fontSize:12,color:colors.text,fontWeight:'800'},deleteText:{color:colors.danger},iconAction:{width:32,height:32,borderRadius:16,backgroundColor:colors.faint,alignItems:'center',justifyContent:'center'},
-  backdrop:{flex:1,justifyContent:'flex-end',backgroundColor:'rgba(15,23,42,0.55)'},sheet:{maxHeight:'82%',backgroundColor:colors.surface,borderTopLeftRadius:24,borderTopRightRadius:24,overflow:'hidden'},tallSheet:{height:'88%'},sheetHead:{flexDirection:'row',alignItems:'center',gap:11,padding:16,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:colors.border},sheetIcon:{width:38,height:38,borderRadius:16,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center'},sheetTitle:{color:colors.text,fontSize:18,fontWeight:'900',textTransform:'capitalize'},sheetSub:{color:colors.muted,fontSize:11,marginTop:2},close:{width:36,height:36,borderRadius:16,backgroundColor:colors.faint,alignItems:'center',justifyContent:'center'},sheetAction:{paddingHorizontal:16,paddingTop:12},sheetList:{padding:16},
-  listCard:{flexDirection:'row',alignItems:'center',gap:8,padding:11,borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:colors.border,borderRadius:16,marginBottom:7,backgroundColor:colors.surface},listIcon:{width:36,height:36,borderRadius:16,backgroundColor:colors.faint,alignItems:'center',justifyContent:'center'},listTitle:{color:colors.text,fontWeight:'900',fontSize:14},
-  bedGrid:{padding:16,flexDirection:'row',flexWrap:'wrap',gap:10},bed:{width:'47%',borderRadius:16,padding:13,alignItems:'center'},bedFree:{backgroundColor:colors.successSoft},bedOccupied:{backgroundColor:colors.dangerSoft},bedTitle:{color:colors.text,fontWeight:'900',marginTop:5},bedStatus:{fontSize:11,fontWeight:'800',marginTop:2},removeBed:{position:'absolute',right:6,top:6,width:25,height:25,borderRadius:12,backgroundColor:'#fff',alignItems:'center',justifyContent:'center'},tapInfo:{fontSize:9,color:colors.muted,marginTop:5},
-  form:{padding:18,gap:10},fieldLabel:{color:colors.muted,fontSize:11,fontWeight:'800',textTransform:'uppercase'},shareRow:{flexDirection:'row',gap:7},share:{flex:1,height:44,borderWidth:1,borderColor:colors.border,borderRadius:16,alignItems:'center',justifyContent:'center'},shareActive:{backgroundColor:colors.primary,borderColor:colors.primary},shareText:{color:colors.primary,fontWeight:'900',fontSize:10},shareTextActive:{color:'#fff'},tenantHero:{flexDirection:'row',alignItems:'center',gap:12,marginBottom:8},avatar:{width:58,height:58,borderRadius:29,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center'},avatarText:{color:'#fff',fontSize:23,fontWeight:'900'},tenantName:{color:colors.text,fontSize:20,fontWeight:'900'},infoRow:{padding:12,borderRadius:16,backgroundColor:colors.faint},infoLabel:{fontSize:10,color:colors.muted,fontWeight:'800',textTransform:'uppercase'},infoValue:{fontSize:13,color:colors.text,fontWeight:'700',marginTop:3},contactRow:{flexDirection:'row',gap:10},contact:{flex:1},limitBox:{padding:14,borderRadius:16,backgroundColor:colors.dangerSoft,gap:6},limitText:{color:colors.muted,lineHeight:20,paddingVertical:6},fab:{position:'absolute',right:20,bottom:24,width:58,height:58,borderRadius:29,backgroundColor:colors.primary,alignItems:'center',justifyContent:'center',shadowColor:colors.primary,shadowOpacity:.28,shadowRadius:16,shadowOffset:{width:0,height:8},elevation:8},
+  screen: { flex: 1, backgroundColor: colors.bg }, body: { padding: 16, paddingBottom: 0 }, flex: { flex: 1 }, row: { flexDirection: 'row', alignItems: 'center', gap: 10 }, muted: { color: colors.muted, fontSize: 12, marginTop: 2 }, footerSpace: { height: 110 },
+  usage: { backgroundColor: colors.surface, borderRadius: 16, padding: 10, marginBottom: 10, shadowColor: '#111827', shadowOpacity: .06, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 2 }, usageFull: { backgroundColor: colors.dangerSoft }, usageTitle: { color: colors.text, fontWeight: '900', fontSize: 13 }, usagePct: { color: colors.primary, fontWeight: '900' }, limitPct: { color: colors.danger }, track: { height: 5, borderRadius: 6, backgroundColor: '#e5e7eb', overflow: 'hidden', marginTop: 8 }, fill: { height: '100%', borderRadius: 6 },
+  stats: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 16, paddingVertical: 10, paddingHorizontal: 8, marginBottom: 10, shadowColor: '#111827', shadowOpacity: .06, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 2 }, statItem: { flex: 1, alignItems: 'center' }, statValue: { fontSize: 18, fontWeight: '900', color: colors.primary }, statLabel: { fontSize: 9, color: colors.muted, fontWeight: '700', marginTop: 2 }, divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginBottom: 10 }, sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }, heading: { fontSize: 20, fontWeight: '900', color: colors.text },
+  propertyCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 12, marginBottom: 10, shadowColor: '#111827', shadowOpacity: .07, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 2 }, propertyTop: { flexDirection: 'row', alignItems: 'center', gap: 9 }, buildingIcon: { width: 36, height: 36, borderRadius: 16, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' }, buildingName: { fontSize: 16, fontWeight: '900', color: colors.text }, moreButton: { width: 34, height: 34, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.faint }, metadata: { color: colors.muted, fontSize: 11, fontWeight: '600', marginTop: 9 }, cardFoot: { marginTop: 7, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }, viewDetails: { color: colors.primary, fontSize: 12, fontWeight: '900' }, overflowMenu: { position: 'absolute', right: 12, top: 48, width: 128, backgroundColor: colors.surface, borderRadius: 16, paddingVertical: 5, shadowColor: '#111827', shadowOpacity: .16, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 8, zIndex: 10 }, menuItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 12 }, menuText: { fontSize: 12, color: colors.text, fontWeight: '800' }, deleteText: { color: colors.danger }, iconAction: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center' },
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.55)' }, sheet: { maxHeight: '82%', backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' }, tallSheet: { height: '88%' }, sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }, sheetIcon: { width: 38, height: 38, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }, sheetTitle: { color: colors.text, fontSize: 18, fontWeight: '900', textTransform: 'capitalize' }, sheetSub: { color: colors.muted, fontSize: 11, marginTop: 2 }, close: { width: 36, height: 36, borderRadius: 16, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center' }, sheetAction: { paddingHorizontal: 16, paddingTop: 12 }, sheetList: { padding: 16 },
+  listCard: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, borderRadius: 16, marginBottom: 7, backgroundColor: colors.surface }, listIcon: { width: 36, height: 36, borderRadius: 16, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center' }, listTitle: { color: colors.text, fontWeight: '900', fontSize: 14 },
+  bedGrid: { padding: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, bed: { width: '47%', borderRadius: 16, padding: 13, alignItems: 'center' }, bedFree: { backgroundColor: colors.successSoft }, bedOccupied: { backgroundColor: colors.dangerSoft }, bedTitle: { color: colors.text, fontWeight: '900', marginTop: 5 }, bedStatus: { fontSize: 11, fontWeight: '800', marginTop: 2 }, removeBed: { position: 'absolute', right: 6, top: 6, width: 25, height: 25, borderRadius: 12, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }, tapInfo: { fontSize: 9, color: colors.muted, marginTop: 5 },
+  form: { padding: 18, gap: 10 }, fieldLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }, shareRow: { flexDirection: 'row', gap: 7 }, share: { flex: 1, height: 44, borderWidth: 1, borderColor: colors.border, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }, shareActive: { backgroundColor: colors.primary, borderColor: colors.primary }, shareText: { color: colors.primary, fontWeight: '900', fontSize: 10 }, shareTextActive: { color: '#fff' }, tenantHero: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }, avatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }, avatarText: { color: '#fff', fontSize: 23, fontWeight: '900' }, tenantName: { color: colors.text, fontSize: 20, fontWeight: '900' }, infoRow: { padding: 12, borderRadius: 16, backgroundColor: colors.faint }, infoLabel: { fontSize: 10, color: colors.muted, fontWeight: '800', textTransform: 'uppercase' }, infoValue: { fontSize: 13, color: colors.text, fontWeight: '700', marginTop: 3 }, contactRow: { flexDirection: 'row', gap: 10 }, contact: { flex: 1 }, limitBox: { padding: 14, borderRadius: 16, backgroundColor: colors.dangerSoft, gap: 6 }, limitText: { color: colors.muted, lineHeight: 20, paddingVertical: 6 }, fab: { position: 'absolute', right: 20, bottom: 24, width: 58, height: 58, borderRadius: 29, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: colors.primary, shadowOpacity: .28, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
+  skeletonBlock: { backgroundColor: '#e4e8ef', borderRadius: 8 },
 });

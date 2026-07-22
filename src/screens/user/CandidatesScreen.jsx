@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Alert, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -9,12 +9,19 @@ import AppHeader from '../../components/AppHeader';
 import AppInput from '../../components/AppInput';
 import EmptyState from '../../components/EmptyState';
 import KeyboardAvoid from '../../components/KeyboardAvoid';
-import ScreenSkeleton, { DetailSkeleton } from '../../components/Skeleton';
+import { DetailSkeleton } from '../../components/Skeleton';
 import { buildingApi } from '../../api/buildingApi';
 import { tenantApi } from '../../api/tenantApi';
 import { rentApi } from '../../api/rentApi';
 import { colors } from '../../utils/constants';
 import { compactLocation, dateText, getMessage, money } from '../../utils/helpers';
+
+const candidatesCache = {
+  hasData: false,
+  tenants: [],
+  rentMap: new Map(),
+  buildings: [],
+};
 
 // ---------- Small building blocks ----------
 
@@ -113,12 +120,55 @@ function CandidateRow({ tenant, rent, onPress }) {
   );
 }
 
+function CandidatesDataSkeleton() {
+  return (
+    <View pointerEvents="none">
+      <View style={styles.kpiRow}>
+        {[0, 1, 2, 3].map(i => (
+          <View key={i} style={[styles.kpi, i < 3 && styles.kpiDivider]}>
+            <View style={[styles.skeletonBlock, { width: 34, height: 18 }]} />
+            <View style={[styles.skeletonBlock, { width: 44, height: 10, marginTop: 4 }]} />
+          </View>
+        ))}
+      </View>
+      <View style={styles.searchCard}>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          <View style={[styles.skeletonBlock, { flex: 1, height: 32, borderRadius: 8 }]} />
+          <View style={[styles.skeletonBlock, { flex: 1, height: 32, borderRadius: 8 }]} />
+        </View>
+        <View style={[styles.skeletonBlock, { width: '100%', height: 42, borderRadius: 10, marginTop: 4 }]} />
+      </View>
+      {[0, 1, 2].map(i => (
+        <View key={i} style={[styles.row, { marginTop: 10 }]}>
+          <View style={[styles.skeletonBlock, { width: 40, height: 40, borderRadius: 11 }]} />
+          <View style={styles.flex}>
+            <View style={[styles.skeletonBlock, { width: '60%', height: 14 }]} />
+            <View style={[styles.skeletonBlock, { width: '45%', height: 10, marginTop: 6 }]} />
+            <View style={[styles.skeletonBlock, { width: '35%', height: 10, marginTop: 6 }]} />
+            <View style={{ flexDirection: 'row', gap: 16, marginTop: 10 }}>
+              {[0, 1, 2].map(j => (
+                <View key={j}>
+                  <View style={[styles.skeletonBlock, { width: 40, height: 8 }]} />
+                  <View style={[styles.skeletonBlock, { width: 34, height: 12, marginTop: 3 }]} />
+                </View>
+              ))}
+            </View>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // ---------- Screen ----------
 
 export default function CandidatesScreen({ navigation, route }) {
-  const [loading, setLoading] = useState(true);
-  const [tenants, setTenants] = useState([]);
-  const [rentMap, setRentMap] = useState(new Map());
+  const [dataLoading, setDataLoading] = useState(!candidatesCache.hasData);
+  const [dataError, setDataError] = useState(null);
+  const [tenants, setTenants] = useState(candidatesCache.tenants);
+  const [rentMap, setRentMap] = useState(candidatesCache.rentMap);
+  const [buildings, setBuildings] = useState(candidatesCache.buildings);
+
   const [q, setQ] = useState('');
   const [searchType, setSearchType] = useState('name');
   const [searchResults, setSearchResults] = useState(null);
@@ -130,23 +180,52 @@ export default function CandidatesScreen({ navigation, route }) {
   const [editForm, setEditForm] = useState({});
   const [docs, setDocs] = useState({});
   const [saving, setSaving] = useState(false);
-  const [buildings, setBuildings] = useState([]);
   const [allocation, setAllocation] = useState({ buildingId: '', floorId: '', roomId: '', bedId: '' });
   const [availableBeds, setAvailableBeds] = useState([]);
 
-  const load = useCallback(async () => {
+  const hasLoadedRef = useRef(candidatesCache.hasData);
+  const loadRequestRef = useRef(0);
+
+  const load = useCallback(async (options = {}) => {
+    const requestId = ++loadRequestRef.current;
+    if (!options.background) {
+      setDataLoading(true);
+    }
+    setDataError(null);
     try {
-      const [tenantList, rentList, buildingList] = await Promise.all([tenantApi.list(), rentApi.all(), buildingApi.list()]);
-      setTenants(Array.isArray(tenantList) ? tenantList : []);
-      setRentMap(new Map((Array.isArray(rentList) ? rentList : []).map(item => [String(item.tenant?._id || item.tenantId), item])));
-      setBuildings(Array.isArray(buildingList) ? buildingList : []);
+      const [tenantList, rentList, buildingList] = await Promise.all([
+        tenantApi.list(),
+        rentApi.all(),
+        buildingApi.list(),
+      ]);
+      if (requestId !== loadRequestRef.current) return;
+      const safeTenants = Array.isArray(tenantList) ? tenantList : [];
+      const safeRentMap = new Map((Array.isArray(rentList) ? rentList : []).map(item => [String(item.tenant?._id || item.tenantId), item]));
+      const safeBuildings = Array.isArray(buildingList) ? buildingList : [];
+
+      setTenants(safeTenants);
+      setRentMap(safeRentMap);
+      setBuildings(safeBuildings);
+
+      candidatesCache.hasData = true;
+      candidatesCache.tenants = safeTenants;
+      candidatesCache.rentMap = safeRentMap;
+      candidatesCache.buildings = safeBuildings;
     } catch (error) {
-      Alert.alert('Candidates error', getMessage(error));
+      if (requestId === loadRequestRef.current) {
+        setDataError(getMessage(error));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setDataLoading(false);
+      }
     }
   }, []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  useFocusEffect(useCallback(() => {
+    load({ background: hasLoadedRef.current || candidatesCache.hasData })
+      .then(() => { hasLoadedRef.current = true; });
+  }, [load]));
 
   // When opened from an activity log with a tenant name, pre-fill the search so
   // only that candidate is shown (the debounced effect below runs the search).
@@ -218,8 +297,8 @@ export default function CandidatesScreen({ navigation, route }) {
     if (rent?.currentRecord?.status === 'Partial') return 2;
     return 3;
   };
-  const active = [...source.filter(t => t.status === 'Active')].sort((a, b) => rank(a) - rank(b));
-  const inactive = source.filter(t => t.status === 'Inactive');
+  const activeList = [...source.filter(t => t.status === 'Active')].sort((a, b) => rank(a) - rank(b));
+  const inactiveList = source.filter(t => t.status === 'Inactive');
 
   const selectedBuilding = buildings.find(item => item._id === allocation.buildingId);
   const floors = selectedBuilding?.floors || [];
@@ -272,7 +351,10 @@ export default function CandidatesScreen({ navigation, route }) {
 
   const close = () => { setSelectedId(null); setDetail(null); setEditing(false); };
 
-  if (loading) return <ScreenSkeleton header stats={4} rows={5} />;
+  const hasData = candidatesCache.hasData;
+  const showSkeleton = dataLoading && !hasData;
+  const showError = !!dataError && !dataLoading && !hasData;
+
   const t = detail?.tenant;
   const current = detail?.currentRecord;
 
@@ -281,57 +363,65 @@ export default function CandidatesScreen({ navigation, route }) {
       <AppHeader title="Candidates Management" subtitle="All registered tenant candidates" onBack={() => navigation.goBack()} rightIcon="account-plus-outline" onRightPress={() => navigation.navigate('AddCandidate')} />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
 
-        {/* KPI row — single card, hairline-divided */}
-        <View style={styles.kpiRow}>
-          <KPI value={stats.active} label="Active" />
-          <KPI value={stats.dues} label="Dues" />
-          <KPI value={stats.overdue} label="Overdue" />
-          <KPI value={stats.inactive} label="Vacated" last />
-        </View>
-
-        {/* Search — segmented type + compact input */}
-        <View style={styles.searchCard}>
-          <View style={styles.segmentTrack}>
-            <Segment label="By name" active={searchType === 'name'} onPress={() => { setSearchType('name'); setQ(''); setSearchResults(null); }} />
-            <Segment label="By room" active={searchType === 'room'} onPress={() => { setSearchType('room'); setQ(''); setSearchResults(null); }} />
-          </View>
-          <View style={styles.searchInputRow}>
-            <Icon name="magnify" size={16} color={colors.muted} style={styles.searchIcon} />
-            <AppInput
-              placeholder={searchType === 'name' ? 'Search tenant name' : 'Search room number'}
-              value={q}
-              onChangeText={setQ}
-              style={styles.searchInput}
-            />
-            {searching ? <Icon name="loading" size={16} color={colors.muted} /> : null}
-          </View>
-        </View>
-
-        {active.length ? (
+        {showSkeleton ? (
+          <CandidatesDataSkeleton />
+        ) : showError ? (
+          <EmptyState title="Unable to load candidates" message={dataError} icon="wifi-alert" />
+        ) : (
           <>
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>Active</Text>
-              <Text style={styles.sectionCount}>{active.length}</Text>
+            {/* KPI row — single card, hairline-divided */}
+            <View style={styles.kpiRow}>
+              <KPI value={stats.active} label="Active" />
+              <KPI value={stats.dues} label="Dues" />
+              <KPI value={stats.overdue} label="Overdue" />
+              <KPI value={stats.inactive} label="Vacated" last />
             </View>
-            {active.map(item => (
-              <CandidateRow key={item._id} tenant={item} rent={rentMap.get(String(item._id))} onPress={() => openDetail(item._id)} />
-            ))}
-          </>
-        ) : null}
 
-        {inactive.length ? (
-          <>
-            <View style={styles.sectionHead}>
-              <Text style={[styles.sectionTitle, styles.sectionTitleMuted]}>Vacated</Text>
-              <Text style={styles.sectionCount}>{inactive.length}</Text>
+            {/* Search — segmented type + compact input */}
+            <View style={styles.searchCard}>
+              <View style={styles.segmentTrack}>
+                <Segment label="By name" active={searchType === 'name'} onPress={() => { setSearchType('name'); setQ(''); setSearchResults(null); }} />
+                <Segment label="By room" active={searchType === 'room'} onPress={() => { setSearchType('room'); setQ(''); setSearchResults(null); }} />
+              </View>
+              <View style={styles.searchInputRow}>
+                <Icon name="magnify" size={16} color={colors.muted} style={styles.searchIcon} />
+                <AppInput
+                  placeholder={searchType === 'name' ? 'Search tenant name' : 'Search room number'}
+                  value={q}
+                  onChangeText={setQ}
+                  style={styles.searchInput}
+                />
+                {searching ? <Icon name="loading" size={16} color={colors.muted} /> : null}
+              </View>
             </View>
-            {inactive.map(item => (
-              <CandidateRow key={item._id} tenant={item} rent={rentMap.get(String(item._id))} onPress={() => openDetail(item._id)} />
-            ))}
-          </>
-        ) : null}
 
-        {!active.length && !inactive.length ? <EmptyState title="No candidates found" icon="account-search-outline" /> : null}
+            {activeList.length ? (
+              <>
+                <View style={styles.sectionHead}>
+                  <Text style={styles.sectionTitle}>Active</Text>
+                  <Text style={styles.sectionCount}>{activeList.length}</Text>
+                </View>
+                {activeList.map(item => (
+                  <CandidateRow key={item._id} tenant={item} rent={rentMap.get(String(item._id))} onPress={() => openDetail(item._id)} />
+                ))}
+              </>
+            ) : null}
+
+            {inactiveList.length ? (
+              <>
+                <View style={styles.sectionHead}>
+                  <Text style={[styles.sectionTitle, styles.sectionTitleMuted]}>Vacated</Text>
+                  <Text style={styles.sectionCount}>{inactiveList.length}</Text>
+                </View>
+                {inactiveList.map(item => (
+                  <CandidateRow key={item._id} tenant={item} rent={rentMap.get(String(item._id))} onPress={() => openDetail(item._id)} />
+                ))}
+              </>
+            ) : null}
+
+            {!activeList.length && !inactiveList.length ? <EmptyState title="No candidates found" icon="account-search-outline" /> : null}
+          </>
+        )}
         <View style={styles.footer} />
       </ScrollView>
 
@@ -614,4 +704,5 @@ const styles = StyleSheet.create({
   history: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   historyMonth: { fontSize: 12, color: colors.text, fontWeight: '700' },
   historyAmount: { fontSize: 12, color: colors.success, fontWeight: '800' },
+  skeletonBlock: { backgroundColor: '#e4e8ef', borderRadius: 8 },
 });

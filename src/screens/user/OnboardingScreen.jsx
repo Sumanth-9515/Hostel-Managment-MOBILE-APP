@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useRef } from 'react';
 import { Alert, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -8,11 +8,16 @@ import AppHeader from '../../components/AppHeader';
 import AppInput from '../../components/AppInput';
 import EmptyState from '../../components/EmptyState';
 import KeyboardAvoid from '../../components/KeyboardAvoid';
-import ScreenSkeleton from '../../components/Skeleton';
 import { useSidebar } from '../../components/Sidebar';
 import { tenantApi } from '../../api/tenantApi';
 import { colors, ONBOARDING_PUBLIC_URL } from '../../utils/constants';
 import { compactLocation, dateText, getMessage, money } from '../../utils/helpers';
+
+const onboardingCache = {
+  hasData: false,
+  tenants: [],
+  link: '',
+};
 
 // ---------- Small building blocks ----------
 
@@ -43,6 +48,13 @@ function KPI({ value, label, last }) {
     </View>
   );
 }
+
+// Category colour coding (consistent across light & dark).
+const categoryMeta = {
+  default: { label: 'Activity', color: '#64748b', soft: '#f1f5f9', icon: 'history' },
+};
+
+const metaFor = entityType => categoryMeta.default;
 
 function Segment({ label, active, onPress }) {
   return (
@@ -159,73 +171,105 @@ function ShareModal({ visible, link, onClose }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={close}>
       <KeyboardAvoid modal style={styles.flex}>
-      <Pressable style={styles.shareBackdrop} onPress={close}>
-        <Pressable style={styles.shareCard} onPress={() => {}}>
-          <View style={styles.shareHead}>
-            <View style={styles.flex}>
-              <Text style={styles.shareTitle}>Share onboarding link</Text>
-              <Text style={styles.shareSubtitle}>Send the form link to a candidate.</Text>
+        <Pressable style={styles.shareBackdrop} onPress={close}>
+          <Pressable style={styles.shareCard} onPress={() => {}}>
+            <View style={styles.shareHead}>
+              <View style={styles.flex}>
+                <Text style={styles.shareTitle}>Share onboarding link</Text>
+                <Text style={styles.shareSubtitle}>Send the form link to a candidate.</Text>
+              </View>
+              <Pressable style={styles.close} onPress={close} hitSlop={6}>
+                <Icon name="close" size={18} color={colors.muted} />
+              </Pressable>
             </View>
-            <Pressable style={styles.close} onPress={close} hitSlop={6}>
-              <Icon name="close" size={18} color={colors.muted} />
-            </Pressable>
-          </View>
 
-          <View style={styles.shareTabs}>
-            {['whatsapp', 'email'].map(item => (
+            <View style={styles.shareTabs}>
+              {['whatsapp', 'email'].map(item => (
+                <Pressable
+                  key={item}
+                  style={[styles.shareTab, mode === item && styles.shareTabActive]}
+                  onPress={() => { setMode(item); setStatusMsg(null); }}
+                >
+                  <Text style={[styles.shareTabText, mode === item && styles.shareTabTextActive]}>
+                    {item === 'whatsapp' ? 'WhatsApp' : 'Email'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {mode === 'email' ? (
+              <AppInput
+                placeholder="Enter email address"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+            ) : (
+              <AppInput
+                placeholder="Enter mobile number"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+              />
+            )}
+
+            {status ? (
+              <Text style={[styles.shareStatus, status.type === 'error' ? styles.shareStatusError : styles.shareStatusOk]}>
+                {status.message}
+              </Text>
+            ) : null}
+
+            <View style={styles.shareActions}>
+              <Pressable style={styles.shareCancel} onPress={close}>
+                <Text style={styles.shareCancelText}>Cancel</Text>
+              </Pressable>
               <Pressable
-                key={item}
-                style={[styles.shareTab, mode === item && styles.shareTabActive]}
-                onPress={() => { setMode(item); setStatusMsg(null); }}
+                style={[styles.shareSubmit, sending && styles.shareSubmitDisabled]}
+                onPress={mode === 'email' ? sendEmail : shareWhatsApp}
+                disabled={sending}
               >
-                <Text style={[styles.shareTabText, mode === item && styles.shareTabTextActive]}>
-                  {item === 'whatsapp' ? 'WhatsApp' : 'Email'}
+                <Text style={styles.shareSubmitText}>
+                  {mode === 'email' ? (sending ? 'Sending…' : 'Send email') : 'Share on WhatsApp'}
                 </Text>
               </Pressable>
-            ))}
-          </View>
-
-          {mode === 'email' ? (
-            <AppInput
-              placeholder="Enter email address"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-          ) : (
-            <AppInput
-              placeholder="Enter mobile number"
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-            />
-          )}
-
-          {status ? (
-            <Text style={[styles.shareStatus, status.type === 'error' ? styles.shareStatusError : styles.shareStatusOk]}>
-              {status.message}
-            </Text>
-          ) : null}
-
-          <View style={styles.shareActions}>
-            <Pressable style={styles.shareCancel} onPress={close}>
-              <Text style={styles.shareCancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.shareSubmit, sending && styles.shareSubmitDisabled]}
-              onPress={mode === 'email' ? sendEmail : shareWhatsApp}
-              disabled={sending}
-            >
-              <Text style={styles.shareSubmitText}>
-                {mode === 'email' ? (sending ? 'Sending…' : 'Send email') : 'Share on WhatsApp'}
-              </Text>
-            </Pressable>
-          </View>
+            </View>
+          </Pressable>
         </Pressable>
-      </Pressable>
       </KeyboardAvoid>
     </Modal>
+  );
+}
+
+function OnboardingDataSkeleton() {
+  return (
+    <View pointerEvents="none">
+      <View style={styles.kpiRow}>
+        {[0, 1, 2, 3].map(i => (
+          <View key={i} style={[styles.kpi, i < 3 && styles.kpiDivider]}>
+            <View style={[styles.skeletonBlock, { width: 34, height: 18 }]} />
+            <View style={[styles.skeletonBlock, { width: 44, height: 10, marginTop: 4 }]} />
+          </View>
+        ))}
+      </View>
+      <View style={styles.skeletonCard}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View style={[styles.skeletonBlock, { width: 100, height: 14 }]} />
+          <View style={[styles.skeletonBlock, { width: 120, height: 11 }]} />
+        </View>
+        <View style={[styles.skeletonBlock, { width: '100%', height: 32, marginTop: 10, borderRadius: 9 }]} />
+      </View>
+      {[0, 1, 2].map(i => (
+        <View key={i} style={[styles.candidateRow, { marginTop: 10 }]}>
+          <View style={[styles.skeletonBlock, { width: 40, height: 40, borderRadius: 11 }]} />
+          <View style={styles.flex}>
+            <View style={[styles.skeletonBlock, { width: '50%', height: 14 }]} />
+            <View style={[styles.skeletonBlock, { width: '40%', height: 10, marginTop: 6 }]} />
+            <View style={[styles.skeletonBlock, { width: '45%', height: 10, marginTop: 6 }]} />
+          </View>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -233,21 +277,27 @@ function ShareModal({ visible, link, onClose }) {
 
 export default function OnboardingScreen({ navigation, onLogout }) {
   const { open } = useSidebar();
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(!onboardingCache.hasData);
+  const [dataError, setDataError] = useState(null);
   const [linkLoading, setLinkLoading] = useState(false);
-  const [link, setLink] = useState('');
+  const [link, setLink] = useState(onboardingCache.link);
   const [showQr, setShowQr] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [tenants, setTenants] = useState([]);
+  const [tenants, setTenants] = useState(onboardingCache.tenants);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [documents, setDocuments] = useState(null);
+
+  const hasLoadedRef = useRef(onboardingCache.hasData);
+  const loadRequestRef = useRef(0);
 
   const loadLink = useCallback(async () => {
     setLinkLoading(true);
     try {
       const data = await tenantApi.generateLink();
-      setLink(buildOnboardingLink(data));
+      const generatedLink = buildOnboardingLink(data);
+      setLink(generatedLink);
+      onboardingCache.link = generatedLink;
     } catch (error) {
       Alert.alert('Link failed', getMessage(error));
     } finally {
@@ -255,17 +305,38 @@ export default function OnboardingScreen({ navigation, onLogout }) {
     }
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
+    const requestId = ++loadRequestRef.current;
+    if (!options.background) {
+      setDataLoading(true);
+    }
+    setDataError(null);
     try {
       const data = await tenantApi.list({ source: 'onboarding-link' });
-      setTenants(Array.isArray(data) ? data : []);
+      if (requestId !== loadRequestRef.current) return;
+      const safeTenants = Array.isArray(data) ? data : [];
+      setTenants(safeTenants);
+      onboardingCache.hasData = true;
+      onboardingCache.tenants = safeTenants;
     } catch (error) {
-      Alert.alert('Onboarding error', getMessage(error));
+      if (requestId === loadRequestRef.current) {
+        setDataError(getMessage(error));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setDataLoading(false);
+      }
     }
   }, []);
-  useFocusEffect(useCallback(() => { load(); loadLink(); }, [load, loadLink]));
+
+  useFocusEffect(useCallback(() => {
+    const hasData = onboardingCache.hasData;
+    load({ background: hasLoadedRef.current || hasData })
+      .then(() => { hasLoadedRef.current = true; });
+    if (!onboardingCache.link) {
+      loadLink();
+    }
+  }, [load, loadLink]));
 
   const filtered = useMemo(() => tenants.filter(item => {
     const query = search.trim().toLowerCase();
@@ -280,8 +351,11 @@ export default function OnboardingScreen({ navigation, onLogout }) {
     inactive: tenants.filter(t => t.status === 'Inactive').length,
   }), [tenants]);
 
-  if (loading) return <ScreenSkeleton header stats={4} rows={5} />;
   const qrUrl = link ? `https://api.qrserver.com/v1/create-qr-code/?size=360x360&data=${encodeURIComponent(link)}` : '';
+
+  const hasData = onboardingCache.hasData;
+  const showSkeleton = dataLoading && !hasData;
+  const showError = !!dataError && !dataLoading && !hasData;
 
   return (
     <View style={styles.screen}>
@@ -297,108 +371,116 @@ export default function OnboardingScreen({ navigation, onLogout }) {
           <Icon name="chevron-right" size={18} color={colors.muted} />
         </Pressable>
 
-        {/* KPI row — single card, hairline-divided, no boxes */}
-        <View style={styles.kpiRow}>
-          <KPI value={stats.total} label="Via link" />
-          <KPI value={stats.active} label="Active" />
-          <KPI value={stats.allocated} label="Allocated" />
-          <KPI value={stats.inactive} label="Vacated" last />
-        </View>
+        {showSkeleton ? (
+          <OnboardingDataSkeleton />
+        ) : showError ? (
+          <EmptyState title="Unable to load onboarding registrations" message={dataError} icon="wifi-alert" />
+        ) : (
+          <>
+            {/* KPI row — single card, hairline-divided, no boxes */}
+            <View style={styles.kpiRow}>
+              <KPI value={stats.total} label="Via link" />
+              <KPI value={stats.active} label="Active" />
+              <KPI value={stats.allocated} label="Allocated" />
+              <KPI value={stats.inactive} label="Vacated" last />
+            </View>
 
-        {/* Onboarding link — one permanent link per owner, never expires */}
-        <View style={styles.card}>
-          <View style={styles.linkHeadRow}>
-            <Text style={styles.cardTitle}>Onboarding link</Text>
-            <Text style={styles.cardMeta}>{link ? 'Permanent · No expiry' : (linkLoading ? 'Loading…' : 'Unavailable')}</Text>
-          </View>
-
-          {link ? (
-            <>
-              <Text numberOfLines={1} ellipsizeMode="middle" style={styles.link}>{link}</Text>
-              <View style={styles.linkActionsRow}>
-                <Pressable style={styles.iconAction} onPress={() => setShareOpen(true)} hitSlop={4}>
-                  <Icon name="share-variant-outline" size={16} color={colors.primary} />
-                  <Text style={styles.iconActionText}>Share</Text>
-                </Pressable>
-                <Pressable style={styles.iconAction} onPress={() => setShowQr(v => !v)} hitSlop={4}>
-                  <Icon name="qrcode" size={16} color={colors.primary} />
-                  <Text style={styles.iconActionText}>{showQr ? 'Hide QR' : 'QR code'}</Text>
-                </Pressable>
-                <Pressable style={styles.iconAction} onPress={() => Linking.openURL(link)} hitSlop={4}>
-                  <Icon name="open-in-new" size={16} color={colors.primary} />
-                  <Text style={styles.iconActionText}>Preview</Text>
-                </Pressable>
-                <Pressable style={styles.regenAction} onPress={loadLink} disabled={linkLoading} hitSlop={4}>
-                  <Icon name="refresh" size={16} color={colors.muted} />
-                </Pressable>
+            {/* Onboarding link — one permanent link per owner, never expires */}
+            <View style={styles.card}>
+              <View style={styles.linkHeadRow}>
+                <Text style={styles.cardTitle}>Onboarding link</Text>
+                <Text style={styles.cardMeta}>{link ? 'Permanent · No expiry' : (linkLoading ? 'Loading…' : 'Unavailable')}</Text>
               </View>
-              {showQr ? (
-                <View style={styles.qrBox}>
-                  <Image source={{ uri: qrUrl }} style={styles.qr} />
-                  <Text style={styles.qrText}>Scan to open the registration form</Text>
+
+              {link ? (
+                <>
+                  <Text numberOfLines={1} ellipsizeMode="middle" style={styles.link}>{link}</Text>
+                  <View style={styles.linkActionsRow}>
+                    <Pressable style={styles.iconAction} onPress={() => setShareOpen(true)} hitSlop={4}>
+                      <Icon name="share-variant-outline" size={16} color={colors.primary} />
+                      <Text style={styles.iconActionText}>Share</Text>
+                    </Pressable>
+                    <Pressable style={styles.iconAction} onPress={() => setShowQr(v => !v)} hitSlop={4}>
+                      <Icon name="qrcode" size={16} color={colors.primary} />
+                      <Text style={styles.iconActionText}>{showQr ? 'Hide QR' : 'QR code'}</Text>
+                    </Pressable>
+                    <Pressable style={styles.iconAction} onPress={() => Linking.openURL(link)} hitSlop={4}>
+                      <Icon name="open-in-new" size={16} color={colors.primary} />
+                      <Text style={styles.iconActionText}>Preview</Text>
+                    </Pressable>
+                    <Pressable style={styles.regenAction} onPress={loadLink} disabled={linkLoading} hitSlop={4}>
+                      <Icon name="refresh" size={16} color={colors.muted} />
+                    </Pressable>
+                  </View>
+                  {showQr ? (
+                    <View style={styles.qrBox}>
+                      <Image source={{ uri: qrUrl }} style={styles.qr} />
+                      <Text style={styles.qrText}>Scan to open the registration form</Text>
+                    </View>
+                  ) : null}
+                </>
+              ) : (
+                <Pressable style={styles.generateRow} onPress={loadLink} disabled={linkLoading}>
+                  <Icon name="link-variant" size={16} color="#fff" />
+                  <Text style={styles.generateText}>{linkLoading ? 'Loading link…' : 'Reload link'}</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {/* Candidates section header + search + segmented filters */}
+            <View style={styles.sectionHeadRow}>
+              <Text style={styles.sectionTitle}>Self-registered candidates</Text>
+              <Text style={styles.cardMeta}>{filtered.length}</Text>
+            </View>
+
+            <AppInput placeholder="Search name, phone, email or building" value={search} onChangeText={setSearch} style={styles.search} />
+
+            <View style={styles.segmentTrack}>
+              <Segment label="All" active={status === 'all'} onPress={() => setStatus('all')} />
+              <Segment label="Active" active={status === 'Active'} onPress={() => setStatus('Active')} />
+              <Segment label="Vacated" active={status === 'Inactive'} onPress={() => setStatus('Inactive')} />
+            </View>
+
+            {/* Candidate list — compact rows */}
+            {filtered.length ? filtered.map(item => (
+              <Pressable key={item._id} style={styles.candidateRow} onPress={() => setDocuments(item)}>
+                {item.documents?.passportPhoto ? (
+                  <Image source={{ uri: item.documents.passportPhoto }} style={styles.photo} />
+                ) : (
+                  <View style={styles.photoFallback}>
+                    <Text style={styles.photoText}>{item.name?.[0]?.toUpperCase()}</Text>
+                  </View>
+                )}
+
+                <View style={styles.flex}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+                    <View style={[styles.dot, item.status === 'Inactive' && styles.dotInactive]} />
+                    <Text style={[styles.statusText, item.status === 'Inactive' && styles.statusTextInactive]}>
+                      {item.status === 'Inactive' ? 'Vacated' : 'Active'}
+                    </Text>
+                  </View>
+                  <Text style={styles.meta} numberOfLines={1}>
+                    {item.phone}{item.email ? ` · ${item.email}` : ''}
+                  </Text>
+                  <Text style={styles.meta} numberOfLines={1}>
+                    {item.allocationInfo?.buildingName ? compactLocation(item) : 'Unallocated'} · {dateText(item.joiningDate)}
+                  </Text>
                 </View>
-              ) : null}
-            </>
-          ) : (
-            <Pressable style={styles.generateRow} onPress={loadLink} disabled={linkLoading}>
-              <Icon name="link-variant" size={16} color="#fff" />
-              <Text style={styles.generateText}>{linkLoading ? 'Loading link…' : 'Reload link'}</Text>
-            </Pressable>
-          )}
-        </View>
 
-        {/* Candidates section header + search + segmented filters */}
-        <View style={styles.sectionHeadRow}>
-          <Text style={styles.sectionTitle}>Self-registered candidates</Text>
-          <Text style={styles.cardMeta}>{filtered.length}</Text>
-        </View>
-
-        <AppInput placeholder="Search name, phone, email or building" value={search} onChangeText={setSearch} style={styles.search} />
-
-        <View style={styles.segmentTrack}>
-          <Segment label="All" active={status === 'all'} onPress={() => setStatus('all')} />
-          <Segment label="Active" active={status === 'Active'} onPress={() => setStatus('Active')} />
-          <Segment label="Vacated" active={status === 'Inactive'} onPress={() => setStatus('Inactive')} />
-        </View>
-
-        {/* Candidate list — compact rows */}
-        {filtered.length ? filtered.map(item => (
-          <Pressable key={item._id} style={styles.candidateRow} onPress={() => setDocuments(item)}>
-            {item.documents?.passportPhoto ? (
-              <Image source={{ uri: item.documents.passportPhoto }} style={styles.photo} />
-            ) : (
-              <View style={styles.photoFallback}>
-                <Text style={styles.photoText}>{item.name?.[0]?.toUpperCase()}</Text>
-              </View>
+                <View style={styles.trailing}>
+                  <Text style={styles.rent}>{money(item.rentAmount || 0)}</Text>
+                  <Icon name="chevron-right" size={16} color={colors.muted} />
+                </View>
+              </Pressable>
+            )) : (
+              <EmptyState
+                title="No onboarding candidates"
+                message={tenants.length ? 'No candidates match this filter.' : 'Share the onboarding link and registrations will appear here.'}
+                icon="account-clock-outline"
+              />
             )}
-
-            <View style={styles.flex}>
-              <View style={styles.nameRow}>
-                <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-                <View style={[styles.dot, item.status === 'Inactive' && styles.dotInactive]} />
-                <Text style={[styles.statusText, item.status === 'Inactive' && styles.statusTextInactive]}>
-                  {item.status === 'Inactive' ? 'Vacated' : 'Active'}
-                </Text>
-              </View>
-              <Text style={styles.meta} numberOfLines={1}>
-                {item.phone}{item.email ? ` · ${item.email}` : ''}
-              </Text>
-              <Text style={styles.meta} numberOfLines={1}>
-                {item.allocationInfo?.buildingName ? compactLocation(item) : 'Unallocated'} · {dateText(item.joiningDate)}
-              </Text>
-            </View>
-
-            <View style={styles.trailing}>
-              <Text style={styles.rent}>{money(item.rentAmount || 0)}</Text>
-              <Icon name="chevron-right" size={16} color={colors.muted} />
-            </View>
-          </Pressable>
-        )) : (
-          <EmptyState
-            title="No onboarding candidates"
-            message={tenants.length ? 'No candidates match this filter.' : 'Share the onboarding link and registrations will appear here.'}
-            icon="account-clock-outline"
-          />
+          </>
         )}
 
         <View style={styles.footer} />
@@ -540,4 +622,6 @@ const styles = StyleSheet.create({
   shareSubmit: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.success },
   shareSubmitDisabled: { opacity: 0.7 },
   shareSubmitText: { fontSize: 12.5, color: '#fff', fontWeight: '800' },
+  skeletonBlock: { backgroundColor: '#e4e8ef', borderRadius: 8 },
+  skeletonCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 14, marginBottom: 12 },
 });

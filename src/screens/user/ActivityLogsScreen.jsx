@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   Pressable,
@@ -17,9 +18,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { activityApi } from '../../api/activityApi';
+import { tenantApi } from '../../api/tenantApi';
 import { dateText, getMessage, pickArray } from '../../utils/helpers';
 
 const filters = ['All', 'Building', 'Floor', 'Room', 'Tenant', 'Rent'];
+
+const activityCache = {
+  hasData: false,
+  logs: [],
+};
 
 // ── Light / Dark palettes (self-contained — screen adapts to the OS theme) ──
 const palettes = {
@@ -73,6 +80,41 @@ const searchTermFor = item =>
   item?.entityName || item?.tenantName || item?.tenant?.name || item?.name ||
   item?.metadata?.name || item?.metadata?.tenantName || item?.metadata?.entityName ||
   item?.meta?.name || item?.details?.name || item?.entity?.name || '';
+
+const idValue = value => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') return value._id || value.id || '';
+  return String(value);
+};
+
+const tenantIdFor = item => {
+  const type = String(item?.entityType || '').toLowerCase();
+  return idValue(item?.tenantId) ||
+    idValue(item?.tenant?._id || item?.tenant) ||
+    idValue(item?.metadata?.tenantId || item?.metadata?.tenant) ||
+    idValue(item?.meta?.tenantId || item?.meta?.tenant) ||
+    idValue(item?.details?.tenantId || item?.details?.tenant) ||
+    idValue(item?.entity?.tenantId || item?.entity?.tenant) ||
+    (type === 'tenant' ? idValue(item?.entityId || item?.targetId || item?.referenceId) : '');
+};
+
+const activityHaystack = item => [
+  item?.action,
+  item?.type,
+  item?.entityType,
+  item?.description,
+  item?.message,
+  item?.entityName,
+  item?.tenantName,
+  item?.tenant?.name,
+  item?.metadata?.name,
+  item?.metadata?.tenantName,
+  item?.metadata?.entityName,
+  item?.meta?.name,
+  item?.details?.name,
+  item?.entity?.name,
+].filter(Boolean).join(' ').toLowerCase();
 
 // Translucent soft background that also reads well in dark mode.
 const softTone = (meta, dark) => (dark ? `${meta.color}26` : meta.soft);
@@ -198,31 +240,80 @@ function LogCard({ item, index, theme, dark, onPress }) {
   );
 }
 
+function ActivityDataSkeleton({ theme }) {
+  return (
+    <View pointerEvents="none" style={styles.listContent}>
+      {[0, 1, 2, 3].map(i => (
+        <View
+          key={i}
+          style={[
+            styles.card,
+            {
+              backgroundColor: theme.surface,
+              borderColor: theme.border,
+              shadowOpacity: 0,
+            },
+          ]}>
+          <View style={[styles.cardIcon, { backgroundColor: '#e4e8ef' }]} />
+          <View style={styles.cardBody}>
+            <View style={styles.cardTopRow}>
+              <View style={[styles.skeletonBlock, { width: 50, height: 10 }]} />
+              <View style={[styles.skeletonBlock, { width: 40, height: 10 }]} />
+            </View>
+            <View style={[styles.skeletonBlock, { width: '70%', height: 14, marginTop: 6 }]} />
+            <View style={[styles.skeletonBlock, { width: '90%', height: 11, marginTop: 6 }]} />
+            <View style={[styles.skeletonBlock, { width: '30%', height: 10, marginTop: 6 }]} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export default function ActivityLogsScreen({ navigation, onLogout }) {
   const scheme = useColorScheme();
   const dark = scheme === 'dark';
   const theme = dark ? palettes.dark : palettes.light;
 
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(!activityCache.hasData);
   const [refreshing, setRefreshing] = useState(false);
-  const [logs, setLogs] = useState([]);
+  const [logs, setLogs] = useState(activityCache.logs);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [error, setError] = useState(null);
 
-  const load = useCallback(async () => {
+  const hasLoadedRef = useRef(activityCache.hasData);
+  const loadRequestRef = useRef(0);
+
+  const load = useCallback(async (options = {}) => {
+    const requestId = ++loadRequestRef.current;
+    if (!options.background) {
+      setDataLoading(true);
+    }
+    setError(null);
     try {
-      setError(null);
       const data = await activityApi.list({ page: 1, limit: 50, entityType: filter });
-      setLogs(pickArray(data));
+      if (requestId !== loadRequestRef.current) return;
+      const safeLogs = pickArray(data);
+      setLogs(safeLogs);
+      activityCache.hasData = true;
+      activityCache.logs = safeLogs;
     } catch (err) {
-      setError(getMessage(err));
+      if (requestId === loadRequestRef.current) {
+        setError(getMessage(err));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setDataLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [filter]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => {
+    load({ background: hasLoadedRef.current || activityCache.hasData })
+      .then(() => { hasLoadedRef.current = true; });
+  }, [load]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -232,15 +323,30 @@ export default function ActivityLogsScreen({ navigation, onLogout }) {
 
   // Tap an activity → open the screen it belongs to, pre-filtered to that entity.
   // Building / Floor / Room → My Hostels. Tenant → Candidates. Rent → Rent Payments.
-  const openActivity = useCallback(item => {
-    const type = String(item?.entityType || '').toLowerCase();
-    const term = searchTermFor(item);
-    if (type === 'rent') {
-      navigation.navigate('UserTabs', { screen: 'Rent', params: term ? { search: term } : {} });
-    } else if (type === 'tenant') {
-      navigation.navigate('Candidates', term ? { search: term } : {});
-    } else if (type === 'building' || type === 'floor' || type === 'room') {
-      navigation.navigate('UserTabs', { screen: 'Hostels' });
+  const openActivity = useCallback(async item => {
+    const directTenantId = tenantIdFor(item);
+    if (directTenantId) {
+      navigation.navigate('TenantDetails', { tenantId: directTenantId });
+      return;
+    }
+
+    const term = searchTermFor(item).trim().toLowerCase();
+    const haystack = activityHaystack(item);
+    try {
+      const tenants = await tenantApi.list();
+      const list = Array.isArray(tenants) ? tenants : [];
+      const match = list.find(tenant => {
+        const name = String(tenant?.name || '').trim().toLowerCase();
+        if (!name) return false;
+        return (term && name === term) || (term && name.includes(term)) || haystack.includes(name);
+      });
+      if (match?._id) {
+        navigation.navigate('TenantDetails', { tenantId: match._id });
+      } else {
+        Alert.alert('Candidate not found', 'This activity log does not have enough candidate details to open full tenant details.');
+      }
+    } catch (err) {
+      Alert.alert('Unable to open candidate', getMessage(err));
     }
   }, [navigation]);
 
@@ -254,6 +360,9 @@ export default function ActivityLogsScreen({ navigation, onLogout }) {
       : logs;
     return groupLogs(filtered);
   }, [logs, search]);
+
+  const hasData = activityCache.hasData;
+  const showSkeleton = dataLoading && !hasData;
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg }]}>
@@ -309,10 +418,8 @@ export default function ActivityLogsScreen({ navigation, onLogout }) {
       </View>
 
       {/* ── Content ── */}
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color="#4338ca" />
-        </View>
+      {showSkeleton ? (
+        <ActivityDataSkeleton theme={theme} />
       ) : (
         <SectionList
           sections={sections}
@@ -448,4 +555,5 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   retryText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  skeletonBlock: { backgroundColor: '#e4e8ef', borderRadius: 8 },
 });

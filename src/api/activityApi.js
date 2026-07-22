@@ -1,5 +1,5 @@
-import api from './client';
+import { resilientGet } from './apiHelpers';
 
 export const activityApi = {
-  list: params => api.get('/activities', { params }).then(r => r.data),
+  list: params => resilientGet('/activities', { params }).then(r => r.data),
 };

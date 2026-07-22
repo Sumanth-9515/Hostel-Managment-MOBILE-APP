@@ -1,10 +1,10 @@
-import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import AppCard from '../../components/AppCard';
 import AppHeader from '../../components/AppHeader';
-import ScreenSkeleton from '../../components/Skeleton';
+import EmptyState from '../../components/EmptyState';
 import { useSidebar } from '../../components/Sidebar';
 import { authApi } from '../../api/authApi';
 import { buildingApi } from '../../api/buildingApi';
@@ -13,6 +13,33 @@ import { colors } from '../../utils/constants';
 import { getMessage, money } from '../../utils/helpers';
 
 const pct = (num, den) => (den > 0 ? Math.round((num / den) * 100) : 0);
+
+const currentMonthValue = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const monthLabel = (monthYear = currentMonthValue()) => {
+  const [year, month] = String(monthYear).split('-').map(Number);
+  return new Date(year, month - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+};
+
+const monthOptions = (count = 12) => {
+  const now = new Date();
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
+    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    return { value, label: monthLabel(value) };
+  });
+};
+
+const dashboardCache = {
+  hasData: false,
+  profile: null,
+  overview: [],
+  selectedMonth: currentMonthValue(),
+  monthlyRevenue: null,
+};
 
 function Bar({ value, total, color = colors.primary }) {
   return (
@@ -46,35 +73,130 @@ function Action({ icon, label, color, onPress }) {
   );
 }
 
+function MonthChip({ label, active, onPress }) {
+  return (
+    <Pressable
+      style={[styles.monthChip, active && styles.monthChipActive]}
+      onPress={event => {
+        event.stopPropagation();
+        onPress();
+      }}>
+      <Text style={[styles.monthChipText, active && styles.monthChipTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function DashboardDataSkeleton() {
+  return (
+    <View pointerEvents="none">
+      <View style={styles.kpiGrid}>
+        {[0, 1, 2, 3].map(i => (
+          <View key={i} style={[styles.kpi, { borderTopColor: '#e4e8ef' }]}>
+            <View style={[styles.skeletonBlock, { width: 34, height: 34, borderRadius: 9 }]} />
+            <View style={[styles.skeletonBlock, { width: '60%', height: 18, marginTop: 8 }]} />
+            <View style={[styles.skeletonBlock, { width: '50%', height: 12, marginTop: 4 }]} />
+          </View>
+        ))}
+      </View>
+      {[0, 1].map(i => (
+        <View key={i} style={styles.skeletonCard}>
+          <View style={[styles.skeletonBlock, { width: '55%', height: 15 }]} />
+          <View style={[styles.skeletonBlock, { width: '35%', height: 26, marginTop: 12 }]} />
+          <View style={[styles.skeletonBlock, { width: '100%', height: 8, marginTop: 10, borderRadius: 6 }]} />
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+            <View style={[styles.skeletonBlock, { flex: 1, height: 48, borderRadius: 12 }]} />
+            <View style={[styles.skeletonBlock, { flex: 1, height: 48, borderRadius: 12 }]} />
+            <View style={[styles.skeletonBlock, { flex: 1, height: 48, borderRadius: 12 }]} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export default function DashboardScreen({ navigation, onLogout, user }) {
   const { open } = useSidebar();
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(!dashboardCache.hasData);
+  const [dataError, setDataError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [profile, setProfile] = useState(user);
-  const [overview, setOverview] = useState([]);
-  const [rent, setRent] = useState([]);
+  const [profile, setProfile] = useState(dashboardCache.profile || user);
+  const [overview, setOverview] = useState(dashboardCache.overview);
+  const [selectedMonth, setSelectedMonth] = useState(dashboardCache.selectedMonth);
+  const [monthlyRevenue, setMonthlyRevenue] = useState(dashboardCache.monthlyRevenue);
+  const [monthlyRevenueLoading, setMonthlyRevenueLoading] = useState(!dashboardCache.monthlyRevenue);
 
-  const load = useCallback(async () => {
+  const hasLoadedRef = useRef(dashboardCache.hasData);
+  const loadRequestRef = useRef(0);
+  const revenueRequestRef = useRef(0);
+  const revenueMonthOptions = useMemo(() => monthOptions(), []);
+
+  const load = useCallback(async (options = {}) => {
+    const requestId = ++loadRequestRef.current;
+    if (!options.background) {
+      setDataLoading(true);
+    }
+    setDataError(null);
     try {
-      const [p, ov, rentAll] = await Promise.all([
+      const [p, ov] = await Promise.all([
         authApi.profile().catch(() => user),
         buildingApi.overview().catch(() => []),
-        rentApi.all().catch(() => []),
       ]);
+      if (requestId !== loadRequestRef.current) return;
+      const safeOverview = Array.isArray(ov) ? ov : [];
       setProfile(p);
-      setOverview(Array.isArray(ov) ? ov : []);
-      setRent(Array.isArray(rentAll) ? rentAll : []);
+      setOverview(safeOverview);
+      dashboardCache.hasData = true;
+      dashboardCache.profile = p;
+      dashboardCache.overview = safeOverview;
     } catch (error) {
-      Alert.alert('Dashboard error', getMessage(error));
+      if (requestId === loadRequestRef.current) {
+        setDataError(getMessage(error));
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === loadRequestRef.current) {
+        setDataLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [user]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const loadMonthlyRevenue = useCallback(async monthYear => {
+    const requestId = ++revenueRequestRef.current;
+    setMonthlyRevenueLoading(true);
+    setMonthlyRevenue(null);
+    dashboardCache.monthlyRevenue = null;
+    try {
+      const data = await rentApi.monthlySummary({ monthYear, includePaid: false });
+      if (requestId !== revenueRequestRef.current) return;
+      setMonthlyRevenue(data || null);
+      dashboardCache.monthlyRevenue = data || null;
+    } catch (error) {
+      if (requestId === revenueRequestRef.current) {
+        setMonthlyRevenue(null);
+      }
+    } finally {
+      if (requestId === revenueRequestRef.current) {
+        setMonthlyRevenueLoading(false);
+      }
+    }
+  }, []);
 
-  if (loading) return <ScreenSkeleton header stats={6} cards={2} />;
+  useFocusEffect(useCallback(() => {
+    load({ background: hasLoadedRef.current || dashboardCache.hasData })
+      .then(() => { hasLoadedRef.current = true; });
+  }, [load]));
+
+  useEffect(() => {
+    loadMonthlyRevenue(selectedMonth);
+  }, [loadMonthlyRevenue, selectedMonth]);
+
+  const selectMonth = monthYear => {
+    setSelectedMonth(monthYear);
+    setMonthlyRevenueLoading(true);
+    setMonthlyRevenue(null);
+    dashboardCache.selectedMonth = monthYear;
+    dashboardCache.monthlyRevenue = null;
+  };
 
   const totalBeds = overview.reduce((s, b) => s + (b.totalBeds || 0), 0);
   const occupiedBeds = overview.reduce((s, b) => s + (b.occupiedBeds || 0), 0);
@@ -83,16 +205,21 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
   const totalRooms = overview.reduce((s, b) => s + (b.totalRooms || 0), 0);
   const totalTenants = overview.reduce((s, b) => s + (b.totalTenants || 0), 0);
 
-  const totalRevenue = rent.reduce((s, t) => s + (t.record?.rentAmount || 0), 0);
-  const collected = rent.reduce((s, t) => s + (t.record?.paidAmount || 0), 0);
-  const pending = rent.reduce((s, t) => s + (t.remaining || 0), 0);
-  const paidCount = rent.filter(t => t.record?.status === 'Paid').length;
-  const partialCount = rent.filter(t => t.record?.status === 'Partial').length;
-  const dueCount = rent.filter(t => t.record?.status === 'Due').length;
+  const revenueSummary = monthlyRevenue?.summary || {};
+  const totalRevenue = revenueSummary.totalRevenue || 0;
+  const collected = revenueSummary.collectedRevenue || 0;
+  const pending = revenueSummary.pendingRevenue || 0;
+  const paidCount = revenueSummary.counts?.Paid || 0;
+  const partialCount = revenueSummary.counts?.Partial || 0;
+  const dueCount = revenueSummary.counts?.Due || 0;
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const ownerName = profile?.owner || profile?.name || 'Owner';
+
+  const hasData = dashboardCache.hasData;
+  const showSkeleton = dataLoading && !hasData;
+  const showError = !!dataError && !dataLoading && !hasData;
 
   return (
     <View style={styles.screen}>
@@ -100,7 +227,7 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
       <ScrollView
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); loadMonthlyRevenue(selectedMonth); }} />}>
 
         <View style={styles.greetingRow}>
           <Text style={styles.hello}>{greet}, {ownerName}</Text>
@@ -108,59 +235,88 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
         </View>
         <Text style={styles.muted}>{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
 
-        {/* KPI strip */}
-        <View style={styles.kpiGrid}>
-          <Kpi icon="bed" label="Total Beds" value={totalBeds} sub={`${availableBeds} available`} color={colors.info} />
-          <Kpi icon="account-group" label="Tenants" value={totalTenants} color={colors.violet} />
-          <Kpi icon="cash-check" label="Collected" value={money(collected)} sub={`${pct(collected, totalRevenue)}% of target`} color={colors.success} />
-          <Kpi icon="cash-minus" label="Pending" value={money(pending)} sub="Outstanding" color={colors.danger} />
-        </View>
+        {showSkeleton ? <DashboardDataSkeleton /> : showError ? (
+          <EmptyState title="Unable to load dashboard" message={dataError} icon="wifi-alert" />
+        ) : (
+          <>
+            {/* KPI strip */}
+            <View style={styles.kpiGrid}>
+              <Kpi icon="bed" label="Total Beds" value={totalBeds} sub={`${availableBeds} available`} color={colors.info} />
+              <Kpi icon="account-group" label="Tenants" value={totalTenants} color={colors.violet} />
+              <Kpi icon="cash-check" label="Collected" value={monthlyRevenueLoading ? 'Loading...' : money(collected)} sub={monthlyRevenueLoading ? 'Fetching month' : `${pct(collected, totalRevenue)}% of target`} color={colors.success} />
+              <Kpi icon="cash-minus" label="Pending" value={monthlyRevenueLoading ? 'Loading...' : money(pending)} sub={monthlyRevenueLoading ? 'Fetching month' : 'Outstanding'} color={colors.danger} />
+            </View>
 
-        {/* Monthly revenue */}
-        <AppCard>
-          <View style={styles.rowBetween}>
-            <Text style={styles.cardTitle}>Monthly Revenue</Text>
-            <Text style={styles.tag}>{new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' })}</Text>
-          </View>
-          <View style={styles.revRow}>
-            <Text style={styles.revBig}>{money(collected)}</Text>
-            <Text style={styles.revPct}>{pct(collected, totalRevenue)}%</Text>
-          </View>
-          <Text style={styles.muted}>of {money(totalRevenue)} expected</Text>
-          <View style={styles.barWrap}><Bar value={collected} total={totalRevenue} color={colors.primary} /></View>
-          <View style={styles.miniGrid}>
-            <View style={[styles.mini, { backgroundColor: colors.successSoft }]}>
-              <Text style={[styles.miniValue, { color: colors.success }]}>{paidCount}</Text>
-              <Text style={styles.miniLabel}>Paid</Text>
-            </View>
-            <View style={[styles.mini, { backgroundColor: colors.accentSoft }]}>
-              <Text style={[styles.miniValue, { color: colors.warning }]}>{partialCount}</Text>
-              <Text style={styles.miniLabel}>Partial</Text>
-            </View>
-            <View style={[styles.mini, { backgroundColor: colors.dangerSoft }]}>
-              <Text style={[styles.miniValue, { color: colors.danger }]}>{dueCount}</Text>
-              <Text style={styles.miniLabel}>Due</Text>
-            </View>
-          </View>
-        </AppCard>
+            {/* Monthly revenue */}
+            <Pressable onPress={() => navigation.navigate('RevenueOverview', { monthYear: selectedMonth })}>
+              <AppCard>
+                <View style={styles.rowBetween}>
+                  <View>
+                    <Text style={styles.cardTitle}>Monthly Revenue</Text>
+                    <Text style={styles.cardHint}>Tap card for due and partial details</Text>
+                  </View>
+                  <Text style={styles.tag}>{monthLabel(selectedMonth)}</Text>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.monthFilter}
+                  nestedScrollEnabled>
+                  {revenueMonthOptions.map(option => (
+                    <MonthChip
+                      key={option.value}
+                      label={option.label}
+                      active={option.value === selectedMonth}
+                      onPress={() => selectMonth(option.value)}
+                    />
+                  ))}
+                </ScrollView>
+                <View style={styles.revRow}>
+                  <Text style={styles.revBig}>{monthlyRevenueLoading ? 'Loading...' : money(collected)}</Text>
+                  <Text style={styles.revPct}>{monthlyRevenueLoading ? '--' : `${pct(collected, totalRevenue)}%`}</Text>
+                </View>
+                <Text style={styles.muted}>{monthlyRevenueLoading ? `Fetching ${monthLabel(selectedMonth)} revenue` : `of ${money(totalRevenue)} expected`}</Text>
+                <View style={styles.barWrap}><Bar value={monthlyRevenueLoading ? 0 : collected} total={totalRevenue} color={colors.primary} /></View>
+                <View style={styles.miniGrid}>
+                  <View style={[styles.mini, { backgroundColor: colors.successSoft }]}>
+                    <Text style={[styles.miniValue, { color: colors.success }]}>{monthlyRevenueLoading ? '-' : paidCount}</Text>
+                    <Text style={styles.miniLabel}>Paid</Text>
+                  </View>
+                  <View style={[styles.mini, { backgroundColor: colors.accentSoft }]}>
+                    <Text style={[styles.miniValue, { color: colors.warning }]}>{monthlyRevenueLoading ? '-' : partialCount}</Text>
+                    <Text style={styles.miniLabel}>Partial</Text>
+                  </View>
+                  <View style={[styles.mini, { backgroundColor: colors.dangerSoft }]}>
+                    <Text style={[styles.miniValue, { color: colors.danger }]}>{monthlyRevenueLoading ? '-' : dueCount}</Text>
+                    <Text style={styles.miniLabel}>Due</Text>
+                  </View>
+                </View>
+                <View style={styles.viewDetailsRow}>
+                  <Text style={styles.viewDetailsText}>View month overview</Text>
+                  <Icon name="chevron-right" size={18} color={colors.primary} />
+                </View>
+              </AppCard>
+            </Pressable>
 
-        {/* Occupancy */}
-        <AppCard>
-          <Text style={styles.cardTitle}>Bed Occupancy</Text>
-          <View style={styles.rowBetween}>
-            <Text style={styles.muted}>{occupiedBeds} occupied</Text>
-            <Text style={styles.muted}>{availableBeds} available</Text>
-          </View>
-          <View style={styles.barWrap}><Bar value={occupiedBeds} total={totalBeds} color={colors.info} /></View>
-          <View style={styles.occGrid}>
-            {[['Floors', totalFloors], ['Rooms', totalRooms], ['Beds', totalBeds]].map(([l, v]) => (
-              <View key={l} style={styles.occCell}>
-                <Text style={styles.occValue}>{v}</Text>
-                <Text style={styles.miniLabel}>{l}</Text>
+            {/* Occupancy */}
+            <AppCard>
+              <Text style={styles.cardTitle}>Bed Occupancy</Text>
+              <View style={styles.rowBetween}>
+                <Text style={styles.muted}>{occupiedBeds} occupied</Text>
+                <Text style={styles.muted}>{availableBeds} available</Text>
               </View>
-            ))}
-          </View>
-        </AppCard>
+              <View style={styles.barWrap}><Bar value={occupiedBeds} total={totalBeds} color={colors.info} /></View>
+              <View style={styles.occGrid}>
+                {[['Floors', totalFloors], ['Rooms', totalRooms], ['Beds', totalBeds]].map(([l, v]) => (
+                  <View key={l} style={styles.occCell}>
+                    <Text style={styles.occValue}>{v}</Text>
+                    <Text style={styles.miniLabel}>{l}</Text>
+                  </View>
+                ))}
+              </View>
+            </AppCard>
+          </>
+        )}
 
         {/* Quick actions */}
         <AppCard>
@@ -176,37 +332,41 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
         </AppCard>
 
         {/* Properties */}
-        <View style={styles.rowBetween}>
-          <Text style={styles.sectionTitle}>Properties</Text>
-        </View>
-        {overview.length === 0 ? (
-          <AppCard><Text style={styles.muted}>No properties yet. Add a hostel from My Hostels.</Text></AppCard>
-        ) : overview.map(b => {
-          const occ = pct(b.occupiedBeds, b.totalBeds);
-          const color = occ >= 80 ? colors.success : occ >= 50 ? colors.warning : colors.danger;
-          return (
-            <AppCard key={b.buildingId}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.bName} numberOfLines={1}>{b.buildingName}</Text>
-                <Text style={[styles.occPill, { color, backgroundColor: `${color}18` }]}>{occ}% full</Text>
-              </View>
-              {b.address ? <Text style={styles.muted} numberOfLines={1}>{b.address}</Text> : null}
-              <View style={styles.barWrap}><Bar value={b.occupiedBeds} total={b.totalBeds} color={color} /></View>
-              <View style={styles.bStats}>
-                <Text style={styles.bStat}>{b.totalFloors} floors</Text>
-                <Text style={styles.bStat}>{b.totalRooms} rooms</Text>
-                <Text style={styles.bStat}>{b.totalBeds} beds</Text>
-              </View>
-              <View style={styles.rowBetween}>
-                <View style={styles.tenantCount}>
-                  <Icon name="account-outline" size={15} color={colors.muted} />
-                  <Text style={styles.mutedNoMargin}>{b.totalTenants} tenants</Text>
-                </View>
-                <Text style={styles.bRevenue}>{money(b.totalRevenue)}/mo</Text>
-              </View>
-            </AppCard>
-          );
-        })}
+        {hasData ? (
+          <>
+            <View style={styles.rowBetween}>
+              <Text style={styles.sectionTitle}>Properties</Text>
+            </View>
+            {overview.length === 0 ? (
+              <AppCard><Text style={styles.muted}>No properties yet. Add a hostel from My Hostels.</Text></AppCard>
+            ) : overview.map(b => {
+              const occ = pct(b.occupiedBeds, b.totalBeds);
+              const color = occ >= 80 ? colors.success : occ >= 50 ? colors.warning : colors.danger;
+              return (
+                <AppCard key={b.buildingId}>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.bName} numberOfLines={1}>{b.buildingName}</Text>
+                    <Text style={[styles.occPill, { color, backgroundColor: `${color}18` }]}>{occ}% full</Text>
+                  </View>
+                  {b.address ? <Text style={styles.muted} numberOfLines={1}>{b.address}</Text> : null}
+                  <View style={styles.barWrap}><Bar value={b.occupiedBeds} total={b.totalBeds} color={color} /></View>
+                  <View style={styles.bStats}>
+                    <Text style={styles.bStat}>{b.totalFloors} floors</Text>
+                    <Text style={styles.bStat}>{b.totalRooms} rooms</Text>
+                    <Text style={styles.bStat}>{b.totalBeds} beds</Text>
+                  </View>
+                  <View style={styles.rowBetween}>
+                    <View style={styles.tenantCount}>
+                      <Icon name="account-outline" size={15} color={colors.muted} />
+                      <Text style={styles.mutedNoMargin}>{b.totalTenants} tenants</Text>
+                    </View>
+                    <Text style={styles.bRevenue}>{money(b.totalRevenue)}/mo</Text>
+                  </View>
+                </AppCard>
+              );
+            })}
+          </>
+        ) : null}
         <View style={styles.footerSpacer} />
       </ScrollView>
     </View>
@@ -226,9 +386,15 @@ const styles = StyleSheet.create({
   kpiLabel: { color: colors.muted, fontSize: 12, fontWeight: '700', marginTop: 2 },
   kpiSub: { color: colors.muted, fontSize: 10, marginTop: 2 },
   cardTitle: { color: colors.text, fontSize: 15, fontWeight: '900' },
+  cardHint: { color: colors.muted, fontSize: 11, marginTop: 2 },
   sectionTitle: { color: colors.text, fontSize: 16, fontWeight: '900' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
   tag: { color: colors.muted, fontSize: 11, backgroundColor: colors.faint, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, fontWeight: '700' },
+  monthFilter: { gap: 8, paddingTop: 12, paddingBottom: 2 },
+  monthChip: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10 },
+  monthChipActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  monthChipText: { color: colors.muted, fontSize: 11, fontWeight: '800' },
+  monthChipTextActive: { color: colors.primary },
   revRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 12 },
   revBig: { color: colors.text, fontSize: 26, fontWeight: '900' },
   revPct: { color: colors.primary, fontSize: 22, fontWeight: '900' },
@@ -239,6 +405,8 @@ const styles = StyleSheet.create({
   mini: { flex: 1, borderRadius: 12, paddingVertical: 10, alignItems: 'center' },
   miniValue: { fontSize: 18, fontWeight: '900' },
   miniLabel: { color: colors.muted, fontSize: 11, marginTop: 2, fontWeight: '700' },
+  viewDetailsRow: { borderTopWidth: 1, borderTopColor: colors.faint, paddingTop: 12, marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  viewDetailsText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
   occGrid: { flexDirection: 'row', marginTop: 16, borderTopWidth: 1, borderTopColor: colors.faint, paddingTop: 14 },
   occCell: { flex: 1, alignItems: 'center' },
   occValue: { color: colors.text, fontSize: 18, fontWeight: '900' },
@@ -254,4 +422,6 @@ const styles = StyleSheet.create({
   tenantCount: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   mutedNoMargin: { color: colors.muted },
   footerSpacer: { height: 90 },
+  skeletonBlock: { backgroundColor: '#e4e8ef', borderRadius: 8 },
+  skeletonCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 14, marginBottom: 12 },
 });

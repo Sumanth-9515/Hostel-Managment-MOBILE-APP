@@ -1,5 +1,6 @@
 package com.hostelappmanagementsystem
 
+import android.graphics.Color
 import android.os.Bundle
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -10,6 +11,8 @@ class MainActivity : ReactActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     setTheme(R.style.AppTheme)
+    window.setBackgroundDrawableResource(R.drawable.launch_screen)
+    window.decorView.setBackgroundColor(Color.WHITE)
     super.onCreate(savedInstanceState)
   }
 
