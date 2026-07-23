@@ -1,6 +1,11 @@
 package com.hostelappmanagementsystem
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -13,7 +18,28 @@ class MainActivity : ReactActivity() {
     setTheme(R.style.AppTheme)
     window.setBackgroundDrawableResource(R.drawable.launch_screen)
     window.decorView.setBackgroundColor(Color.WHITE)
+    createNotificationChannel()
     super.onCreate(savedInstanceState)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+  }
+
+  private fun createNotificationChannel() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+    val channel = NotificationChannel(
+      "onboarding",
+      "Onboarding notifications",
+      NotificationManager.IMPORTANCE_HIGH
+    ).apply {
+      description = "Alerts for new tenant onboarding submissions"
+    }
+
+    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    manager.createNotificationChannel(channel)
   }
 
   /**

@@ -1,12 +1,21 @@
-import { Alert, PermissionsAndroid, Platform } from 'react-native';
+import { Alert, AppState, PermissionsAndroid, Platform } from 'react-native';
 import api from '../api/client';
 import { navigate } from '../navigation/navRef';
 
 let unsubscribeTokenRefresh = null;
 let unsubscribeForeground = null;
 let unsubscribeNotificationOpen = null;
+let unsubscribeAppState = null;
 let listenersReady = false;
 let currentToken = null;
+let currentUser = null;
+
+const warnPush = (...args) => {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    // eslint-disable-next-line no-console
+    console.warn('[push]', ...args);
+  }
+};
 
 function getMessaging() {
   try {
@@ -54,10 +63,19 @@ async function saveToken(token, user) {
   });
 }
 
+async function getAndSaveToken(messagingInstance, user) {
+  await messagingInstance.registerDeviceForRemoteMessages();
+  const token = await messagingInstance.getToken();
+  await saveToken(token, user);
+  return token;
+}
+
 // Route a tapped onboarding notification to the Onboarding tab.
 function handleNotificationOpen(remoteMessage) {
-  const type = remoteMessage?.data?.type;
-  if (type === 'onboarding-submission') {
+  const type = String(remoteMessage?.data?.type || '').toLowerCase();
+  const title = String(remoteMessage?.notification?.title || remoteMessage?.data?.title || '').toLowerCase();
+  const body = String(remoteMessage?.notification?.body || remoteMessage?.data?.body || remoteMessage?.data?.message || '').toLowerCase();
+  if (!type || type.includes('onboarding') || title.includes('onboarding') || body.includes('onboarding')) {
     navigate('UserTabs', { screen: 'Onboarding' });
   }
 }
@@ -73,8 +91,9 @@ function attachListeners(messagingInstance) {
   // a lightweight in-app heads-up (WhatsApp-style banner is also handled by
   // OnboardingNotificationsProvider; this gives an instant alert too).
   unsubscribeForeground = messagingInstance.onMessage(async remoteMessage => {
-    const title = remoteMessage?.notification?.title || 'New notification';
-    const body = remoteMessage?.notification?.body || '';
+    const data = remoteMessage?.data || {};
+    const title = remoteMessage?.notification?.title || data.title || 'New onboarding submission';
+    const body = remoteMessage?.notification?.body || data.body || data.message || 'A tenant submitted the onboarding form.';
     Alert.alert(title, body, [
       { text: 'Dismiss', style: 'cancel' },
       { text: 'View', onPress: () => handleNotificationOpen(remoteMessage) },
@@ -99,6 +118,7 @@ export async function registerPushNotifications(user) {
   const messaging = getMessaging();
   const messagingInstance = getMessagingInstance();
   if (!messaging || !messagingInstance || !user || user?.role === 'master') return;
+  currentUser = user;
 
   // Attach tap/foreground listeners FIRST. A notification tap must always be
   // able to open the Onboarding screen even if permission prompts or the
@@ -106,18 +126,29 @@ export async function registerPushNotifications(user) {
   attachListeners(messagingInstance);
 
   try {
+    await messagingInstance.setAutoInitEnabled?.(true);
     const allowed = await requestFirebasePermission(messaging);
-    if (!allowed) return;
+    if (!allowed) {
+      warnPush('notification permission not granted');
+      return;
+    }
 
-    await messagingInstance.registerDeviceForRemoteMessages();
-    const token = await messagingInstance.getToken();
-    await saveToken(token, user);
+    await getAndSaveToken(messagingInstance, user);
 
     if (unsubscribeTokenRefresh) unsubscribeTokenRefresh();
     unsubscribeTokenRefresh = messagingInstance.onTokenRefresh(nextToken => {
-      saveToken(nextToken, user).catch(() => {});
+      saveToken(nextToken, currentUser || user).catch(error => warnPush('token refresh save failed', error?.message || error));
     });
-  } catch {
+
+    if (!unsubscribeAppState) {
+      unsubscribeAppState = AppState.addEventListener('change', state => {
+        if (state === 'active' && currentUser) {
+          getAndSaveToken(messagingInstance, currentUser).catch(error => warnPush('token resume save failed', error?.message || error));
+        }
+      });
+    }
+  } catch (error) {
+    warnPush('setup failed', error?.message || error);
     // Push setup should not block app login or navigation.
   }
 }
@@ -128,10 +159,13 @@ export async function unregisterPushNotifications() {
     if (unsubscribeTokenRefresh) unsubscribeTokenRefresh();
     if (unsubscribeForeground) unsubscribeForeground();
     if (unsubscribeNotificationOpen) unsubscribeNotificationOpen();
+    if (unsubscribeAppState) unsubscribeAppState.remove();
     unsubscribeTokenRefresh = null;
     unsubscribeForeground = null;
     unsubscribeNotificationOpen = null;
+    unsubscribeAppState = null;
     listenersReady = false;
+    currentUser = null;
 
     const messagingInstance = getMessagingInstance();
     const token = currentToken || (messagingInstance ? await messagingInstance.getToken() : null);

@@ -10,6 +10,7 @@ import AppInput from '../../components/AppInput';
 import EmptyState from '../../components/EmptyState';
 import KeyboardAvoid from '../../components/KeyboardAvoid';
 import ProfileImagePopup from '../../components/ProfileImagePopup';
+import { useToast } from '../../components/AppToast';
 import { buildingApi } from '../../api/buildingApi';
 import { rentApi } from '../../api/rentApi';
 import { tenantApi } from '../../api/tenantApi';
@@ -77,6 +78,7 @@ function EditPaymentModal({ record, onClose, onSave }) {
   const [paidAmount, setPaidAmount] = useState(String(record?.paidAmount ?? 0));
   const [note, setNote] = useState('Corrected payment record');
   const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
   const rentAmount = Number(record?.rentAmount || 0);
 
   const save = async () => {
@@ -85,9 +87,9 @@ function EditPaymentModal({ record, onClose, onSave }) {
     if (value > rentAmount) return Alert.alert('Amount too high', `Paid amount cannot exceed rent of ${money(rentAmount)}.`);
     setLoading(true);
     try {
-      await onSave({ recordId: record._id || record.id, rentAmount, paidAmount: value, note });
+      await onSave({ recordId: record._id || record.id, monthYear: record.monthYear, rentAmount, paidAmount: value, note });
     } catch (error) {
-      Alert.alert('Correction failed', getMessage(error));
+      showToast(getMessage(error) || 'Correction failed', 'error');
     } finally {
       setLoading(false);
     }
@@ -149,6 +151,7 @@ function TenantDataSkeleton() {
 
 export default function TenantDetailsScreen({ navigation, route }) {
   const { tenantId } = route.params || {};
+  const { showToast } = useToast();
   const [detail, setDetail] = useState(tenantDetailCache.get(tenantId) || null);
   const [dataLoading, setDataLoading] = useState(!tenantDetailCache.has(tenantId));
   const [dataError, setDataError] = useState(null);
@@ -305,9 +308,10 @@ export default function TenantDetailsScreen({ navigation, route }) {
   };
 
   const correctPayment = async payload => {
-    await rentApi.paymentCorrection(payload);
+    await rentApi.paymentCorrection({ ...payload, tenantId });
     setEditingPayment(null);
     await load();
+    showToast('Payment correction saved', 'success');
   };
 
   const hasData = detail !== null;

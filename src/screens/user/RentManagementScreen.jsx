@@ -12,6 +12,7 @@ import KeyboardAvoid from '../../components/KeyboardAvoid';
 import ProfileImagePopup from '../../components/ProfileImagePopup';
 import { DetailSkeleton } from '../../components/Skeleton';
 import { useSidebar } from '../../components/Sidebar';
+import { useToast } from '../../components/AppToast';
 import { rentApi } from '../../api/rentApi';
 import { colors } from '../../utils/constants';
 import { advancePendingFor, compactLocation, dateText, getMessage, mergeAdvanceIntoDueItems, money } from '../../utils/helpers';
@@ -219,6 +220,7 @@ function EditPaymentModal({ record, onClose, onSave }) {
   const [paidAmount, setPaidAmount] = useState(String(record?.paidAmount ?? 0));
   const [note, setNote] = useState('Corrected payment record');
   const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
   const rentAmount = Number(record?.rentAmount || 0);
 
   const save = async () => {
@@ -227,9 +229,9 @@ function EditPaymentModal({ record, onClose, onSave }) {
     if (value > rentAmount) return Alert.alert('Amount too high', `Paid amount cannot exceed rent of ${money(rentAmount)}.`);
     setLoading(true);
     try {
-      await onSave({ recordId: record._id || record.id, rentAmount, paidAmount: value, note });
+      await onSave({ recordId: record._id || record.id, monthYear: record.monthYear, rentAmount, paidAmount: value, note });
     } catch (error) {
-      Alert.alert('Correction failed', getMessage(error));
+      showToast(getMessage(error) || 'Correction failed', 'error');
     } finally {
       setLoading(false);
     }
@@ -346,6 +348,7 @@ function LocationFilter({ items, value, onChange }) {
 
 export default function RentManagementScreen({ navigation, route, onLogout }) {
   const { open } = useSidebar();
+  const { showToast } = useToast();
   const [dataLoading, setDataLoading] = useState(!rentScreenCache.hasData);
   const [dataError, setDataError] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -559,8 +562,9 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
       setDetailId(null);
       // Update data in the background — no full-screen reload.
       await refreshData();
+      showToast('Payment successful', 'success');
     } catch (error) {
-      Alert.alert('Payment failed', getMessage(error));
+      showToast(getMessage(error) || 'Payment failed', 'error');
     } finally {
       setSaving(false);
     }
@@ -568,10 +572,11 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
 
   const correctPayment = async payload => {
     if (!detailId) return;
-    await rentApi.paymentCorrection(payload);
+    await rentApi.paymentCorrection({ ...payload, tenantId: detailId });
     setEditingPayment(null);
     try { setDetail(await rentApi.tenant(detailId)); } catch {}
     await refreshData();
+    showToast('Payment correction saved', 'success');
   };
 
   const whatsapp = item => {

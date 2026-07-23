@@ -1,10 +1,19 @@
 import api from './client';
 import { resilientGet } from './apiHelpers';
 
-const paymentCorrection = ({ recordId, rentAmount, paidAmount, note }) => {
-  const id = recordId;
-  if (!id) throw new Error('Missing payment record id.');
-  return api.put(`/rent/payment/${id}`, { rentAmount, paidAmount, note }).then(r => r.data);
+const paymentCorrection = async ({ recordId, tenantId, monthYear, rentAmount, paidAmount, note }) => {
+  if (tenantId && monthYear) {
+    try {
+      const response = await api.patch('/rent/payment-correction', { tenantId, monthYear, paidAmount, note });
+      return response.data;
+    } catch (error) {
+      if (error?.response?.status !== 404 || !recordId) throw error;
+    }
+  }
+
+  if (!recordId) throw new Error('Missing payment record id.');
+  const response = await api.put(`/rent/payment/${recordId}`, { rentAmount, paidAmount, note });
+  return response.data;
 };
 
 export const rentApi = {

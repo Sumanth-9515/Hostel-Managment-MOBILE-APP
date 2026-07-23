@@ -3,6 +3,7 @@ import { StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Video from 'react-native-video';
 import AppNavigator from './src/navigation/AppNavigator';
+import { ToastProvider } from './src/components/AppToast';
 import { colors } from './src/utils/constants';
 
 declare const process: { env?: { JEST_WORKER_ID?: string } };
@@ -67,7 +68,9 @@ export default function App() {
           />
         </View>
       ) : (
-        <AppNavigator />
+        <ToastProvider>
+          <AppNavigator />
+        </ToastProvider>
       )}
     </SafeAreaProvider>
   );
