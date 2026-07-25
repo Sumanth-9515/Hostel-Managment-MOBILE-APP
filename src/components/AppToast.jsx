@@ -51,7 +51,13 @@ function ToastItem({ item, onClose }) {
       <Text style={[styles.message, { color: tone.fg }]} numberOfLines={2}>
         {item.message}
       </Text>
-      <Pressable style={styles.close} onPress={() => onClose(item.id)}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss notification"
+        hitSlop={10}
+        style={styles.close}
+        onPress={() => onClose(item.id)}
+      >
         <Icon name="close" size={18} color={tone.fg} />
       </Pressable>
     </Animated.View>
@@ -60,20 +66,45 @@ function ToastItem({ item, onClose }) {
 
 export function ToastProvider({ children }) {
   const [items, setItems] = useState([]);
+  const itemsRef = useRef([]);
   const timers = useRef({});
 
-  const removeToast = useCallback(id => {
+  React.useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  const removeToast = useCallback((id, reason = 'manual') => {
     if (timers.current[id]) {
       clearTimeout(timers.current[id]);
       delete timers.current[id];
     }
+    const item = itemsRef.current.find(current => current.id === id);
+    if (reason === 'manual') {
+      item?.onClose?.();
+    }
     setItems(current => current.filter(item => item.id !== id));
   }, []);
 
-  const showToast = useCallback((message, type = 'info') => {
+  const showToast = useCallback((message, type = 'info', options = {}) => {
+    const toastKey = options.key || null;
+    const duration = Number(options.duration || 2500);
     const id = `${Date.now()}-${Math.random()}`;
-    setItems(current => [...current, { id, message, type }]);
-    timers.current[id] = setTimeout(() => removeToast(id), 2500);
+    setItems(current => {
+      current.forEach(item => {
+        if (!toastKey || item.key === toastKey) {
+          clearTimeout(timers.current[item.id]);
+          delete timers.current[item.id];
+        }
+      });
+      const next = [
+        ...current.filter(item => toastKey && item.key !== toastKey),
+        { id, key: toastKey, message, type, onClose: options.onClose },
+      ];
+      return next.slice(-1);
+    });
+    if (duration > 0) {
+      timers.current[id] = setTimeout(() => removeToast(id, 'timeout'), duration);
+    }
   }, [removeToast]);
 
   const value = useMemo(() => ({ showToast }), [showToast]);

@@ -9,6 +9,7 @@ import { useSidebar } from '../../components/Sidebar';
 import { authApi } from '../../api/authApi';
 import { buildingApi } from '../../api/buildingApi';
 import { rentApi } from '../../api/rentApi';
+import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { getMessage, money } from '../../utils/helpers';
 
@@ -189,6 +190,11 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
   useEffect(() => {
     loadMonthlyRevenue(selectedMonth);
   }, [loadMonthlyRevenue, selectedMonth]);
+
+  useRefreshOnReconnect(useCallback(() => {
+    load({ background: dashboardCache.hasData });
+    loadMonthlyRevenue(selectedMonth);
+  }, [load, loadMonthlyRevenue, selectedMonth]));
 
   const selectMonth = monthYear => {
     setSelectedMonth(monthYear);

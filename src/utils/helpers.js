@@ -1,5 +1,19 @@
-export const getMessage = error =>
-  error?.response?.data?.message || error?.message || 'Something went wrong.';
+export const getMessage = error => {
+  if (error?.code === 'ERR_OFFLINE') {
+    return 'No internet connection. Please check your network.';
+  }
+  if (
+    error?.code === 'ECONNABORTED' ||
+    error?.code === 'ETIMEDOUT' ||
+    String(error?.message || '').toLowerCase().includes('timeout')
+  ) {
+    return 'Slow internet connection. Please check your connectivity.';
+  }
+  if (error?.code === 'ERR_DUPLICATE_REQUEST') {
+    return 'Request already in progress.';
+  }
+  return error?.response?.data?.message || error?.message || 'Something went wrong.';
+};
 
 export const money = value =>
   `Rs. ${Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;

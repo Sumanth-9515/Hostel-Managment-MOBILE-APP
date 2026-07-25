@@ -10,7 +10,6 @@ import MasterApprovalsScreen from '../screens/master/MasterApprovalsScreen';
 const Tab = createBottomTabNavigator();
 
 export default function MasterNavigator({ onLogout }) {
-  const screen = Component => props => <Component {...props} onLogout={onLogout} />;
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -23,10 +22,18 @@ export default function MasterNavigator({ onLogout }) {
           return <Icon name={icons[route.name]} color={color} size={size} />;
         },
       })}>
-      <Tab.Screen name="MasterDashboard" options={{ title: 'Dashboard' }}>{screen(MasterDashboardScreen)}</Tab.Screen>
-      <Tab.Screen name="MasterUsers" options={{ title: 'Users' }}>{screen(MasterUsersScreen)}</Tab.Screen>
-      <Tab.Screen name="MasterPlans" options={{ title: 'Plans' }}>{screen(MasterPlansScreen)}</Tab.Screen>
-      <Tab.Screen name="MasterApprovals" options={{ title: 'Approvals' }}>{screen(MasterApprovalsScreen)}</Tab.Screen>
+      <Tab.Screen name="MasterDashboard" options={{ title: 'Dashboard' }}>
+        {props => <MasterDashboardScreen {...props} onLogout={onLogout} />}
+      </Tab.Screen>
+      <Tab.Screen name="MasterUsers" options={{ title: 'Users' }}>
+        {props => <MasterUsersScreen {...props} onLogout={onLogout} />}
+      </Tab.Screen>
+      <Tab.Screen name="MasterPlans" options={{ title: 'Plans' }}>
+        {props => <MasterPlansScreen {...props} onLogout={onLogout} />}
+      </Tab.Screen>
+      <Tab.Screen name="MasterApprovals" options={{ title: 'Approvals' }}>
+        {props => <MasterApprovalsScreen {...props} onLogout={onLogout} />}
+      </Tab.Screen>
     </Tab.Navigator>
   );
 }

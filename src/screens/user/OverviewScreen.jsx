@@ -9,6 +9,7 @@ import AppInput from '../../components/AppInput';
 import EmptyState from '../../components/EmptyState';
 import Loading from '../../components/Loading';
 import { buildingApi } from '../../api/buildingApi';
+import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { dateText, getMessage, money } from '../../utils/helpers';
 
@@ -248,6 +249,10 @@ export default function OverviewScreen({ navigation }) {
         .then(() => { hasLoadedRef.current = true; });
     }, [load])
   );
+
+  useRefreshOnReconnect(useCallback(() => {
+    load({ background: overviewCache.hasData });
+  }, [load]));
 
   const totals = useMemo(
     () =>

@@ -10,6 +10,7 @@ import KeyboardAvoid from '../../components/KeyboardAvoid';
 import { useSidebar } from '../../components/Sidebar';
 import { buildingApi } from '../../api/buildingApi';
 import { tenantApi } from '../../api/tenantApi';
+import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { dateText, getMessage, money } from '../../utils/helpers';
 
@@ -190,6 +191,10 @@ export default function AddHostelScreen({ onLogout }) {
   useFocusEffect(useCallback(() => {
     refresh({ background: hasLoadedRef.current || hostelCache.hasData })
       .then(() => { hasLoadedRef.current = true; });
+  }, [refresh]));
+
+  useRefreshOnReconnect(useCallback(() => {
+    refresh({ background: hostelCache.hasData });
   }, [refresh]));
 
   const totals = useMemo(() => buildings.reduce((sum, item) => {

@@ -14,6 +14,7 @@ import { DetailSkeleton } from '../../components/Skeleton';
 import { useSidebar } from '../../components/Sidebar';
 import { useToast } from '../../components/AppToast';
 import { rentApi } from '../../api/rentApi';
+import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { advancePendingFor, compactLocation, dateText, getMessage, mergeAdvanceIntoDueItems, money } from '../../utils/helpers';
 
@@ -448,6 +449,11 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
         if (success) hasLoadedRef.current = true;
         return success ? fetchAllDue() : null;
       });
+  }, [load, fetchAllDue]));
+
+  useRefreshOnReconnect(useCallback(() => {
+    load(1, false, { background: rentScreenCache.hasData })
+      .then(success => (success ? fetchAllDue() : null));
   }, [load, fetchAllDue]));
 
   // Silent, in-place refresh after a payment/correction — never flips the

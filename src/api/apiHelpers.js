@@ -1,7 +1,7 @@
 import api from './client';
 
-export const GET_TIMEOUT = 90000;
-export const RETRY_DELAYS = [900, 1800];
+export const GET_TIMEOUT = 20000;
+export const RETRY_DELAYS = [900];
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 

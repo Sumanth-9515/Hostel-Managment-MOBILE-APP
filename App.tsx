@@ -5,11 +5,13 @@ import Video from 'react-native-video';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ToastProvider } from './src/components/AppToast';
 import { colors } from './src/utils/constants';
+import NetworkStatusMonitor from './src/network/NetworkStatusMonitor';
 
 declare const process: { env?: { JEST_WORKER_ID?: string } };
 
 const startVideo = require('./assets/Nilyam-appstart-video.mp4');
 const splashBackground = '#f8f9f8';
+const MAX_SPLASH_MS = 8000;
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -25,7 +27,7 @@ export default function App() {
       setShowSplash(false);
       return undefined;
     }
-    splashTimerRef.current = setTimeout(finishSplash, 60000);
+    splashTimerRef.current = setTimeout(finishSplash, MAX_SPLASH_MS);
     return () => {
       if (splashTimerRef.current) clearTimeout(splashTimerRef.current);
     };
@@ -34,7 +36,10 @@ export default function App() {
   const handleVideoLoad = ({ duration }: { duration?: number }) => {
     if (!duration) return;
     if (splashTimerRef.current) clearTimeout(splashTimerRef.current);
-    splashTimerRef.current = setTimeout(finishSplash, (duration * 1000) + 1000);
+    splashTimerRef.current = setTimeout(
+      finishSplash,
+      Math.min((duration * 1000) + 1000, MAX_SPLASH_MS),
+    );
   };
 
   return (
@@ -69,6 +74,7 @@ export default function App() {
         </View>
       ) : (
         <ToastProvider>
+          <NetworkStatusMonitor />
           <AppNavigator />
         </ToastProvider>
       )}

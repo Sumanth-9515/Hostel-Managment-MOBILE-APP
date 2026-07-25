@@ -2,14 +2,13 @@ import React, { useCallback, useMemo, useState, useRef } from 'react';
 import { Alert, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import AppButton from '../../components/AppButton';
-import AppCard from '../../components/AppCard';
 import AppHeader from '../../components/AppHeader';
 import AppInput from '../../components/AppInput';
 import EmptyState from '../../components/EmptyState';
 import KeyboardAvoid from '../../components/KeyboardAvoid';
 import { useSidebar } from '../../components/Sidebar';
 import { tenantApi } from '../../api/tenantApi';
+import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors, ONBOARDING_PUBLIC_URL } from '../../utils/constants';
 import { compactLocation, dateText, getMessage, money } from '../../utils/helpers';
 
@@ -48,13 +47,6 @@ function KPI({ value, label, last }) {
     </View>
   );
 }
-
-// Category colour coding (consistent across light & dark).
-const categoryMeta = {
-  default: { label: 'Activity', color: '#64748b', soft: '#f1f5f9', icon: 'history' },
-};
-
-const metaFor = entityType => categoryMeta.default;
 
 function Segment({ label, active, onPress }) {
   return (
@@ -333,6 +325,13 @@ export default function OnboardingScreen({ navigation, onLogout }) {
     const hasData = onboardingCache.hasData;
     load({ background: hasLoadedRef.current || hasData })
       .then(() => { hasLoadedRef.current = true; });
+    if (!onboardingCache.link) {
+      loadLink();
+    }
+  }, [load, loadLink]));
+
+  useRefreshOnReconnect(useCallback(() => {
+    load({ background: onboardingCache.hasData });
     if (!onboardingCache.link) {
       loadLink();
     }

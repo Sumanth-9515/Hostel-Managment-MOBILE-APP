@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import { Alert, FlatList, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -9,6 +9,7 @@ import { useSidebar } from '../../components/Sidebar';
 import EmptyState from '../../components/EmptyState';
 import { autoMailApi } from '../../api/autoMailApi';
 import { rentApi } from '../../api/rentApi';
+import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { dateText, getMessage } from '../../utils/helpers';
 
@@ -192,6 +193,10 @@ export default function AutoMailSettingsScreen({ onLogout }) {
   useFocusEffect(useCallback(() => {
     load({ background: hasLoadedRef.current || autoMailCache.hasData })
       .then(() => { hasLoadedRef.current = true; });
+  }, [load]));
+
+  useRefreshOnReconnect(useCallback(() => {
+    load({ background: autoMailCache.hasData });
   }, [load]));
 
   const validate = () => {

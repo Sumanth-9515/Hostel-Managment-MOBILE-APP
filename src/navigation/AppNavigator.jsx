@@ -14,10 +14,19 @@ export default function AppNavigator() {
   const [auth, setAuth] = useState({ token: null, user: null });
 
   useEffect(() => {
+    let mounted = true;
     session.get().then(saved => {
+      if (!mounted) return;
       setAuth(saved);
       setBooting(false);
     });
+    const unsubscribe = session.subscribe(() => {
+      setAuth({ token: null, user: null });
+    });
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

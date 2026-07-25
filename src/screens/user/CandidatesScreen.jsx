@@ -4,7 +4,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { launchImageLibrary } from 'react-native-image-picker';
 import AppButton from '../../components/AppButton';
-import AppCard from '../../components/AppCard';
 import AppHeader from '../../components/AppHeader';
 import AppInput from '../../components/AppInput';
 import EmptyState from '../../components/EmptyState';
@@ -13,6 +12,7 @@ import { DetailSkeleton } from '../../components/Skeleton';
 import { buildingApi } from '../../api/buildingApi';
 import { tenantApi } from '../../api/tenantApi';
 import { rentApi } from '../../api/rentApi';
+import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { compactLocation, dateText, getMessage, money } from '../../utils/helpers';
 
@@ -225,6 +225,10 @@ export default function CandidatesScreen({ navigation, route }) {
   useFocusEffect(useCallback(() => {
     load({ background: hasLoadedRef.current || candidatesCache.hasData })
       .then(() => { hasLoadedRef.current = true; });
+  }, [load]));
+
+  useRefreshOnReconnect(useCallback(() => {
+    load({ background: candidatesCache.hasData });
   }, [load]));
 
   // When opened from an activity log with a tenant name, pre-fill the search so

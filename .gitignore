@@ -40,6 +40,7 @@ local.properties
 *.hprof
 .cxx/
 .kotlin/
+*.jks
 *.keystore
 !debug.keystore
 

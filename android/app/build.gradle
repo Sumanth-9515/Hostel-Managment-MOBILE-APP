@@ -68,7 +68,36 @@ googleServices {
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
+def localPropertiesFile = rootProject.file("local.properties")
+def localSigningProperties = new Properties()
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { stream ->
+        localSigningProperties.load(stream)
+    }
+}
+def releaseSigningValue = { name ->
+    def value = project.findProperty(name)
+    if (value == null || value.toString().trim().isEmpty()) {
+        value = System.getenv(name)
+    }
+    if (value == null || value.toString().trim().isEmpty()) {
+        value = localSigningProperties.getProperty(name)
+    }
+    return value == null ? null : value.toString().trim()
+}
+def releaseStoreFile = releaseSigningValue("HOSTEL_UPLOAD_STORE_FILE")
+def releaseStorePassword = releaseSigningValue("HOSTEL_UPLOAD_STORE_PASSWORD")
+def releaseKeyAlias = releaseSigningValue("HOSTEL_UPLOAD_KEY_ALIAS")
+def releaseKeyPassword = releaseSigningValue("HOSTEL_UPLOAD_KEY_PASSWORD")
+def hasReleaseSigningValues = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+def releaseStoreFileResolved = releaseStoreFile ? file(releaseStoreFile) : null
+def hasReleaseKeystoreFile = releaseStoreFileResolved != null && releaseStoreFileResolved.exists()
+def debugKeystoreFile = file("debug.keystore")
+def usesDebugKeystoreForRelease = hasReleaseKeystoreFile &&
+    releaseStoreFileResolved.canonicalPath == debugKeystoreFile.canonicalPath
+def hasReleaseSigning = hasReleaseSigningValues && hasReleaseKeystoreFile && !usesDebugKeystoreForRelease
+def hasFirebaseConfig = file("google-services.json").exists()
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -103,18 +132,50 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasReleaseSigningValues) {
+            release {
+                storeFile releaseStoreFileResolved
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled enableProguardInReleaseBuilds
+            shrinkResources enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def releaseTaskRequested = graph.allTasks.any { task ->
+        task.name.toLowerCase().contains("release")
+    }
+    if (releaseTaskRequested && !hasReleaseSigning) {
+        def missingSigningMessage = !hasReleaseSigningValues
+            ? "Release builds require HOSTEL_UPLOAD_STORE_FILE, HOSTEL_UPLOAD_STORE_PASSWORD, " +
+              "HOSTEL_UPLOAD_KEY_ALIAS and HOSTEL_UPLOAD_KEY_PASSWORD in android/local.properties, " +
+              "as Gradle properties or as environment variables."
+            : usesDebugKeystoreForRelease
+              ? "Release builds must not use android/app/debug.keystore. " +
+                "Create a private upload keystore and set HOSTEL_UPLOAD_STORE_FILE to that file."
+            : "Release keystore file does not exist: ${releaseStoreFileResolved}. " +
+              "Set HOSTEL_UPLOAD_STORE_FILE to an existing .jks or .keystore file."
+        throw new GradleException(
+            missingSigningMessage
+        )
+    }
+    if (releaseTaskRequested && !hasFirebaseConfig) {
+        throw new GradleException("Release builds require android/app/google-services.json for Firebase/FCM.")
     }
 }
 

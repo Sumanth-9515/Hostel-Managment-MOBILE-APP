@@ -17,20 +17,20 @@ import ActivityLogsScreen from '../screens/user/ActivityLogsScreen';
 import AutoMailSettingsScreen from '../screens/user/AutoMailSettingsScreen';
 import ProfileScreen from '../screens/user/ProfileScreen';
 import OwnerSearchScreen from '../screens/user/OwnerSearchScreen';
+import PrivacyPolicyScreen from '../screens/user/PrivacyPolicyScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
 // Bottom bar: Dashboard, Rent Payments, Onboard Form, My Hostels, AutoMail Settings.
 function Tabs({ onLogout, user }) {
-  const wrap = (Component, extra = {}) => props => <Component {...props} {...extra} onLogout={onLogout} user={user} />;
   return (
     <Tab.Navigator screenOptions={{ headerShown: false }} tabBar={props => <CustomTabBar {...props} />}>
-      <Tab.Screen name="Dashboard">{wrap(DashboardScreen)}</Tab.Screen>
-      <Tab.Screen name="Rent">{wrap(RentManagementScreen)}</Tab.Screen>
-      <Tab.Screen name="Onboarding">{wrap(OnboardingScreen)}</Tab.Screen>
-      <Tab.Screen name="Hostels">{wrap(AddHostelScreen)}</Tab.Screen>
-      <Tab.Screen name="AutoMail">{wrap(AutoMailSettingsScreen)}</Tab.Screen>
+      <Tab.Screen name="Dashboard">{props => <DashboardScreen {...props} onLogout={onLogout} user={user} />}</Tab.Screen>
+      <Tab.Screen name="Rent">{props => <RentManagementScreen {...props} onLogout={onLogout} user={user} />}</Tab.Screen>
+      <Tab.Screen name="Onboarding">{props => <OnboardingScreen {...props} onLogout={onLogout} user={user} />}</Tab.Screen>
+      <Tab.Screen name="Hostels">{props => <AddHostelScreen {...props} onLogout={onLogout} user={user} />}</Tab.Screen>
+      <Tab.Screen name="AutoMail">{props => <AutoMailSettingsScreen {...props} onLogout={onLogout} user={user} />}</Tab.Screen>
     </Tab.Navigator>
   );
 }
@@ -49,6 +49,7 @@ export default function UserNavigator({ onLogout, onUserUpdate, user }) {
           <Stack.Screen name="Overview">{props => <OverviewScreen {...props} onLogout={onLogout} />}</Stack.Screen>
           <Stack.Screen name="ActivityLogs">{props => <ActivityLogsScreen {...props} onLogout={onLogout} />}</Stack.Screen>
           <Stack.Screen name="Profile">{props => <ProfileScreen {...props} onLogout={onLogout} onUserUpdate={onUserUpdate} />}</Stack.Screen>
+          <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
         </Stack.Navigator>
       </SidebarProvider>
     </OnboardingNotificationsProvider>

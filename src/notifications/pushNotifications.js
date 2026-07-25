@@ -12,7 +12,6 @@ let currentUser = null;
 
 const warnPush = (...args) => {
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    // eslint-disable-next-line no-console
     console.warn('[push]', ...args);
   }
 };
