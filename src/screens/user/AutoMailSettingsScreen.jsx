@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useRef } from 'react';
-import { Alert, FlatList, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import AppButton from '../../components/AppButton';
@@ -22,11 +22,29 @@ const defaults = {
 
 const mins = value => { const [hour, minute] = String(value || '').split(':').map(Number); return hour * 60 + minute; };
 const lastRunText = value => value ? new Date(value).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Not run yet';
-const TIME_OPTIONS = Array.from({ length: 96 }, (_, index) => {
-  const hour = Math.floor(index / 4);
-  const minute = (index % 4) * 15;
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-});
+const HOURS = Array.from({ length: 12 }, (_, index) => index + 1);
+const MINUTES = [0, 15, 30, 45];
+
+const parseTime = value => {
+  const [rawHour, rawMinute] = String(value || '09:00').split(':').map(Number);
+  const hour24 = Number.isFinite(rawHour) ? rawHour : 9;
+  const minute = Number.isFinite(rawMinute) ? rawMinute : 0;
+  return {
+    hour: hour24 % 12 || 12,
+    minute: MINUTES.includes(minute) ? minute : 0,
+    period: hour24 >= 12 ? 'PM' : 'AM',
+  };
+};
+
+const toTimeValue = ({ hour, minute, period }) => {
+  const hour24 = period === 'PM' ? (hour % 12) + 12 : hour % 12;
+  return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+};
+
+const timeDisplay = value => {
+  const { hour, minute, period } = parseTime(value);
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${period}`;
+};
 
 const autoMailCache = {
   hasData: false,
@@ -36,22 +54,27 @@ const autoMailCache = {
 
 function TimeSelect({ value, onChange, disabled }) {
   const [open, setOpen] = useState(false);
-  const selectedIndex = Math.max(0, TIME_OPTIONS.indexOf(value));
+  const [draft, setDraft] = useState(parseTime(value));
 
-  const choose = next => {
-    onChange(next);
+  const openPicker = () => {
+    setDraft(parseTime(value));
+    setOpen(true);
+  };
+
+  const choose = () => {
+    onChange(toTimeValue(draft));
     setOpen(false);
   };
 
   return (
     <>
-      <Pressable disabled={disabled} style={[styles.timeSelect, disabled && styles.timeSelectDisabled]} onPress={() => setOpen(true)}>
+      <Pressable disabled={disabled} style={[styles.timeSelect, disabled && styles.timeSelectDisabled]} onPress={openPicker}>
         <View style={styles.timeIcon}><Icon name="clock-outline" size={18} color={colors.primary} /></View>
         <View style={styles.flex}>
           <Text style={styles.timeLabel}>Scheduled Time</Text>
-          <Text style={styles.timeValue}>{value || 'Select time'}</Text>
+          <Text style={styles.timeValue}>{value ? timeDisplay(value) : 'Select time'}</Text>
         </View>
-        <Icon name="chevron-down" size={20} color={colors.muted} />
+        <Icon name="clock-edit-outline" size={20} color={colors.muted} />
       </Pressable>
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
@@ -66,22 +89,37 @@ function TimeSelect({ value, onChange, disabled }) {
                 <Icon name="close" size={21} color={colors.muted} />
               </Pressable>
             </View>
-            <FlatList
-              data={TIME_OPTIONS}
-              keyExtractor={item => item}
-              initialScrollIndex={selectedIndex}
-              getItemLayout={(_, index) => ({ length: 48, offset: 48 * index, index })}
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => {
-                const selected = item === value;
-                return (
-                  <Pressable style={[styles.timeOption, selected && styles.timeOptionSelected]} onPress={() => choose(item)}>
-                    <Icon name={selected ? 'radiobox-marked' : 'clock-time-four-outline'} size={20} color={selected ? colors.primary : colors.muted} />
-                    <Text style={[styles.timeOptionText, selected && { color: colors.primary }]}>{item}</Text>
-                  </Pressable>
-                );
-              }}
-            />
+            <View style={styles.timePreview}>
+              <Icon name="clock-check-outline" size={22} color={colors.primary} />
+              <Text style={styles.timePreviewText}>{timeDisplay(toTimeValue(draft))}</Text>
+            </View>
+            <View style={styles.periodRow}>
+              {['AM', 'PM'].map(period => (
+                <Pressable key={period} style={[styles.periodBtn, draft.period === period && styles.periodBtnActive]} onPress={() => setDraft(prev => ({ ...prev, period }))}>
+                  <Text style={[styles.periodText, draft.period === period && styles.periodTextActive]}>{period}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.pickerLabel}>Hour</Text>
+            <View style={styles.timeGrid}>
+              {HOURS.map(hour => (
+                <Pressable key={hour} style={[styles.timeChip, draft.hour === hour && styles.timeChipActive]} onPress={() => setDraft(prev => ({ ...prev, hour }))}>
+                  <Text style={[styles.timeChipText, draft.hour === hour && styles.timeChipTextActive]}>{hour}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.pickerLabel}>Minute</Text>
+            <View style={styles.minuteRow}>
+              {MINUTES.map(minute => (
+                <Pressable key={minute} style={[styles.minuteChip, draft.minute === minute && styles.timeChipActive]} onPress={() => setDraft(prev => ({ ...prev, minute }))}>
+                  <Text style={[styles.timeChipText, draft.minute === minute && styles.timeChipTextActive]}>{String(minute).padStart(2, '0')}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.timeActions}>
+              <AppButton title="Cancel" icon="close" variant="secondary" style={styles.flex} onPress={() => setOpen(false)} />
+              <AppButton title="Set Time" icon="check" style={styles.flex} onPress={choose} />
+            </View>
           </View>
         </View>
       </Modal>
@@ -295,6 +333,6 @@ export default function AutoMailSettingsScreen({ onLogout }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg }, body: { padding: 16 }, flex: { flex: 1 }, footer: { height: 90 }, muted: { fontSize: 11, color: colors.muted, marginTop: 2 }, cardTitle: { fontSize: 16, fontWeight: '900', color: colors.text }, cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }, masterRow: { flexDirection: 'row', alignItems: 'center', gap: 11 }, masterIcon: { width: 44, height: 44, borderRadius: 13, backgroundColor: colors.violetSoft, alignItems: 'center', justifyContent: 'center' }, policy: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 12, marginBottom: 11 }, disabled: { opacity: .5 }, policyTop: { flexDirection: 'row', alignItems: 'center', gap: 9 }, policyIcon: { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }, titleLine: { flexDirection: 'row', alignItems: 'center', gap: 6 }, policyTitle: { color: colors.text, fontSize: 13, fontWeight: '900' }, count: { fontSize: 10, fontWeight: '900', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, overflow: 'hidden' }, timeBox: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 10 }, timeSelect: { height: 54, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.faint, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10 }, timeSelectDisabled: { opacity: .5 }, timeIcon: { width: 34, height: 34, borderRadius: 9, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' }, timeLabel: { color: colors.muted, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }, timeValue: { color: colors.text, fontSize: 15, fontWeight: '900', marginTop: 2 }, modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.5)' }, timeModal: { height: '64%', backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, paddingBottom: 26 }, modalHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }, modalTitle: { color: colors.text, fontSize: 18, fontWeight: '900' }, closeButton: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center' }, timeOption: { height: 48, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, paddingHorizontal: 12, marginBottom: 6, backgroundColor: colors.faint, borderWidth: 1, borderColor: colors.border }, timeOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft }, timeOptionText: { color: colors.text, fontSize: 15, fontWeight: '800' }, lastRun: { width: 92 }, lastLabel: { fontSize: 9, color: colors.muted, fontWeight: '800' }, lastValue: { fontSize: 10, color: colors.text, fontWeight: '700', marginTop: 3 }, targetGroup: { marginTop: 8, marginBottom: 14 }, groupHead: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 }, groupTitle: { color: colors.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' }, tenantRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }, avatar: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, avatarText: { fontWeight: '900' }, tenantName: { fontSize: 13, color: colors.text, fontWeight: '800' }, sentBox: { alignItems: 'flex-end' }, sentLabel: { fontSize: 9, color: colors.success, fontWeight: '900' }, sentDate: { fontSize: 9, color: colors.muted, marginTop: 2 }, noPolicies: { alignItems: 'center', paddingVertical: 24, backgroundColor: colors.faint, borderRadius: 13 }, noTitle: { color: colors.muted, fontWeight: '800', marginTop: 7 },
+  screen: { flex: 1, backgroundColor: colors.bg }, body: { padding: 16 }, flex: { flex: 1 }, footer: { height: 90 }, muted: { fontSize: 11, color: colors.muted, marginTop: 2 }, cardTitle: { fontSize: 16, fontWeight: '900', color: colors.text }, cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }, masterRow: { flexDirection: 'row', alignItems: 'center', gap: 11 }, masterIcon: { width: 44, height: 44, borderRadius: 13, backgroundColor: colors.violetSoft, alignItems: 'center', justifyContent: 'center' }, policy: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 12, marginBottom: 11 }, disabled: { opacity: .5 }, policyTop: { flexDirection: 'row', alignItems: 'center', gap: 9 }, policyIcon: { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }, titleLine: { flexDirection: 'row', alignItems: 'center', gap: 6 }, policyTitle: { color: colors.text, fontSize: 13, fontWeight: '900' }, count: { fontSize: 10, fontWeight: '900', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, overflow: 'hidden' }, timeBox: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 10 }, timeSelect: { height: 54, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.faint, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10 }, timeSelectDisabled: { opacity: .5 }, timeIcon: { width: 34, height: 34, borderRadius: 9, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' }, timeLabel: { color: colors.muted, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }, timeValue: { color: colors.text, fontSize: 15, fontWeight: '900', marginTop: 2 }, modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.5)' }, timeModal: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, paddingBottom: 26 }, modalHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }, modalTitle: { color: colors.text, fontSize: 18, fontWeight: '900' }, closeButton: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center' }, timeOption: { height: 48, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, paddingHorizontal: 12, marginBottom: 6, backgroundColor: colors.faint, borderWidth: 1, borderColor: colors.border }, timeOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft }, timeOptionText: { color: colors.text, fontSize: 15, fontWeight: '800' }, timePreview: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.primarySoft, marginBottom: 12 }, timePreviewText: { color: colors.primary, fontSize: 25, fontWeight: '900' }, periodRow: { flexDirection: 'row', gap: 8, marginBottom: 12 }, periodBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: colors.faint, borderWidth: 1, borderColor: colors.border }, periodBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary }, periodText: { color: colors.text, fontSize: 13, fontWeight: '900' }, periodTextActive: { color: '#fff' }, pickerLabel: { color: colors.muted, fontSize: 10, fontWeight: '900', textTransform: 'uppercase', marginBottom: 7 }, timeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 12 }, timeChip: { width: '22.8%', alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: colors.faint, borderWidth: 1, borderColor: colors.border }, minuteRow: { flexDirection: 'row', gap: 7, marginBottom: 14 }, minuteChip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: colors.faint, borderWidth: 1, borderColor: colors.border }, timeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary }, timeChipText: { color: colors.text, fontSize: 13, fontWeight: '900' }, timeChipTextActive: { color: '#fff' }, timeActions: { flexDirection: 'row', gap: 9 }, lastRun: { width: 92 }, lastLabel: { fontSize: 9, color: colors.muted, fontWeight: '800' }, lastValue: { fontSize: 10, color: colors.text, fontWeight: '700', marginTop: 3 }, targetGroup: { marginTop: 8, marginBottom: 14 }, groupHead: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 }, groupTitle: { color: colors.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' }, tenantRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }, avatar: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, avatarText: { fontWeight: '900' }, tenantName: { fontSize: 13, color: colors.text, fontWeight: '800' }, sentBox: { alignItems: 'flex-end' }, sentLabel: { fontSize: 9, color: colors.success, fontWeight: '900' }, sentDate: { fontSize: 9, color: colors.muted, marginTop: 2 }, noPolicies: { alignItems: 'center', paddingVertical: 24, backgroundColor: colors.faint, borderRadius: 13 }, noTitle: { color: colors.muted, fontWeight: '800', marginTop: 7 },
   skeletonBlock: { backgroundColor: '#e4e8ef', borderRadius: 8 },
 });

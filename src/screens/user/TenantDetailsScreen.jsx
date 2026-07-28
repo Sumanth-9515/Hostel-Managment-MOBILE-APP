@@ -65,6 +65,27 @@ function Info({ label, value, accent }) {
   );
 }
 
+function PhoneInfo({ label, value }) {
+  if (value == null || value === '') return null;
+  const call = () => {
+    const phone = String(value).replace(/[^\d+]/g, '');
+    if (!phone) return Alert.alert('Phone number missing', 'No valid phone number found.');
+    Linking.openURL(`tel:${phone}`).catch(() => Alert.alert('Unable to open dial pad', 'Please try again from your phone.'));
+  };
+
+  return (
+    <View style={styles.info}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <View style={styles.infoCallRow}>
+        <Text style={[styles.infoValue, styles.infoCallValue]}>{value}</Text>
+        <Pressable style={styles.infoCallBtn} onPress={call}>
+          <Icon name="phone" size={15} color={colors.primary} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function Chip({ label, active, onPress }) {
   return (
     <Pressable style={[styles.chip, active && styles.chipActive]} onPress={onPress}>
@@ -74,6 +95,93 @@ function Chip({ label, active, onPress }) {
 }
 
 // ── Edit-payment (correction) modal ──
+const toDateParts = value => {
+  const date = value ? new Date(value) : new Date();
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  return {
+    day: safeDate.getDate(),
+    month: safeDate.getMonth() + 1,
+    year: safeDate.getFullYear(),
+  };
+};
+
+const dateValue = ({ day, month, year }) =>
+  `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+function JoiningDatePicker({ visible, value, onClose, onSelect }) {
+  const [draft, setDraft] = useState(toDateParts(value));
+  const currentYear = new Date().getFullYear();
+  const years = useMemo(() => Array.from({ length: 81 }, (_, index) => currentYear + 1 - index), [currentYear]);
+  const daysInMonth = new Date(draft.year, draft.month, 0).getDate();
+  const days = useMemo(() => Array.from({ length: daysInMonth }, (_, index) => index + 1), [daysInMonth]);
+  const months = useMemo(() => Array.from({ length: 12 }, (_, index) => ({
+    value: index + 1,
+    label: new Date(2026, index, 1).toLocaleString('en-IN', { month: 'short' }),
+  })), []);
+
+  useEffect(() => {
+    if (visible) setDraft(toDateParts(value));
+  }, [value, visible]);
+
+  const setPart = patch => {
+    setDraft(prev => {
+      const next = { ...prev, ...patch };
+      const maxDay = new Date(next.year, next.month, 0).getDate();
+      return { ...next, day: Math.min(next.day, maxDay) };
+    });
+  };
+
+  const apply = () => {
+    onSelect(dateValue(draft));
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoid modal style={styles.centerBackdrop}>
+        <View style={styles.dateModal}>
+          <View style={styles.modalHead}>
+            <View style={styles.modalTitleRow}>
+              <View style={styles.modalIcon}>
+                <Icon name="calendar-month-outline" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.flex}>
+                <Text style={styles.modalTitle}>Joining Date</Text>
+                <Text style={styles.muted}>{dateText(dateValue(draft))}</Text>
+              </View>
+            </View>
+            <Pressable style={styles.modalClose} onPress={onClose}>
+              <Icon name="close" size={21} color={colors.muted} />
+            </Pressable>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.datePickerBody}>
+            <Text style={styles.fieldLabel}>Month</Text>
+            <View style={styles.chips}>
+              {months.map(month => <Chip key={month.value} label={month.label} active={draft.month === month.value} onPress={() => setPart({ month: month.value })} />)}
+            </View>
+
+            <Text style={styles.fieldLabel}>Day</Text>
+            <View style={styles.chips}>
+              {days.map(day => <Chip key={day} label={String(day)} active={draft.day === day} onPress={() => setPart({ day })} />)}
+            </View>
+
+            <Text style={styles.fieldLabel}>Year</Text>
+            <View style={styles.chips}>
+              {years.map(year => <Chip key={year} label={String(year)} active={draft.year === year} onPress={() => setPart({ year })} />)}
+            </View>
+          </ScrollView>
+
+          <View style={styles.modalActions}>
+            <AppButton title="Cancel" icon="close" variant="secondary" style={styles.flex} onPress={onClose} />
+            <AppButton title="Select Date" icon="check" style={styles.flex} onPress={apply} />
+          </View>
+        </View>
+      </KeyboardAvoid>
+    </Modal>
+  );
+}
+
 function EditPaymentModal({ record, onClose, onSave }) {
   const [paidAmount, setPaidAmount] = useState(String(record?.paidAmount ?? 0));
   const [note, setNote] = useState('Corrected payment record');
@@ -168,6 +276,7 @@ export default function TenantDetailsScreen({ navigation, route }) {
   const [changingRoom, setChangingRoom] = useState(false);
   const [editingPayment, setEditingPayment] = useState(null);
   const [showPhoto, setShowPhoto] = useState(false);
+  const [joiningDateOpen, setJoiningDateOpen] = useState(false);
 
   const hasLoadedRef = useRef(tenantDetailCache.has(tenantId));
   const loadRequestRef = useRef(0);
@@ -384,7 +493,13 @@ export default function TenantDetailsScreen({ navigation, route }) {
                     <View style={styles.flex}><AppInput label="Monthly rent" value={editForm.rentAmount} onChangeText={v => setEditForm(p => ({ ...p, rentAmount: v }))} keyboardType="numeric" /></View>
                     <View style={styles.flex}><AppInput label="Advance amount" value={editForm.advanceAmount} onChangeText={v => setEditForm(p => ({ ...p, advanceAmount: v }))} keyboardType="numeric" /></View>
                   </View>
-                  <AppInput label="Joining date (YYYY-MM-DD)" value={editForm.joiningDate} onChangeText={v => setEditForm(p => ({ ...p, joiningDate: v }))} />
+                  <Pressable style={styles.dateField} onPress={() => setJoiningDateOpen(true)}>
+                    <View style={styles.flex}>
+                      <Text style={styles.dateFieldLabel}>Joining date</Text>
+                      <Text style={styles.dateFieldValue}>{editForm.joiningDate ? dateText(editForm.joiningDate) : 'Select joining date'}</Text>
+                    </View>
+                    <Icon name="calendar-month-outline" size={20} color={colors.primary} />
+                  </Pressable>
                   <AppInput label="Permanent address" value={editForm.permanentAddress} onChangeText={v => setEditForm(p => ({ ...p, permanentAddress: v }))} multiline />
                   <View style={styles.twoCol}>
                     <View style={styles.flex}><AppInput label="Father's name" value={editForm.fatherName} onChangeText={v => setEditForm(p => ({ ...p, fatherName: v }))} /></View>
@@ -426,7 +541,7 @@ export default function TenantDetailsScreen({ navigation, route }) {
                       <Info label="Joining date" value={dateText(t.joiningDate)} />
                       <Info label="Monthly rent" value={money(t.rentAmount || 0)} accent />
                       <Info label="Father's name" value={t.fatherName} />
-                      <Info label="Father's phone" value={t.fatherPhone} />
+                      <PhoneInfo label="Father's phone" value={t.fatherPhone} />
                       <Info label="Current status" value={current?.status || 'No record'} />
                       <Info label="Tenant status" value={t.status} />
                     </View>
@@ -507,6 +622,12 @@ export default function TenantDetailsScreen({ navigation, route }) {
       </KeyboardAvoid>
 
       {editingPayment ? <EditPaymentModal record={editingPayment} onClose={() => setEditingPayment(null)} onSave={correctPayment} /> : null}
+      <JoiningDatePicker
+        visible={joiningDateOpen}
+        value={editForm.joiningDate}
+        onClose={() => setJoiningDateOpen(false)}
+        onSelect={joiningDate => setEditForm(p => ({ ...p, joiningDate }))}
+      />
       <Modal visible={changeRoomOpen} transparent animationType="slide" onRequestClose={() => setChangeRoomOpen(false)}>
         <KeyboardAvoid modal style={styles.centerBackdrop}>
           <View style={styles.roomModal}>
@@ -603,6 +724,9 @@ const styles = StyleSheet.create({
   info: { backgroundColor: colors.faint, borderRadius: 10, padding: 10, minWidth: '47%', flex: 1, marginBottom: 8 },
   infoLabel: { fontSize: 9, color: colors.muted, fontWeight: '800', textTransform: 'uppercase' },
   infoValue: { fontSize: 13, color: colors.text, fontWeight: '700', marginTop: 3 },
+  infoCallRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
+  infoCallValue: { flex: 1, marginTop: 0 },
+  infoCallBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   pill: { fontSize: 11, fontWeight: '800', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
 
   arrears: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.dangerSoft, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 11, marginTop: 4 },
@@ -617,6 +741,9 @@ const styles = StyleSheet.create({
 
   twoCol: { flexDirection: 'row', gap: 9 },
   saveRow: { marginTop: 14 },
+  dateField: { minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 8, backgroundColor: colors.surface, paddingHorizontal: 14, paddingVertical: 9, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dateFieldLabel: { color: colors.muted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+  dateFieldValue: { color: colors.text, fontSize: 15, fontWeight: '700', marginTop: 2 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   chip: { borderRadius: 9, paddingHorizontal: 11, paddingVertical: 8, backgroundColor: colors.faint },
   chipActive: { backgroundColor: colors.primary },
@@ -636,12 +763,14 @@ const styles = StyleSheet.create({
 
   centerBackdrop: { flex: 1, justifyContent: 'center', padding: 20, backgroundColor: 'rgba(17,24,39,0.5)' },
   centerModal: { backgroundColor: colors.surface, borderRadius: 20, padding: 20, gap: 4 },
+  dateModal: { maxHeight: '88%', backgroundColor: colors.surface, borderRadius: 22, padding: 18 },
   roomModal: { maxHeight: '88%', backgroundColor: colors.surface, borderRadius: 22, padding: 18 },
   modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   modalTitleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   modalIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   modalClose: { width: 36, height: 36, borderRadius: 12, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
   modalTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
+  datePickerBody: { paddingTop: 8, paddingBottom: 8 },
   roomPickerBody: { paddingTop: 8, paddingBottom: 8 },
   roomSummary: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 14, backgroundColor: colors.faint, marginTop: 14 },
   roomSummaryTitle: { color: colors.text, fontSize: 13, fontWeight: '900' },

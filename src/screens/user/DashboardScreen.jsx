@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import AppCard from '../../components/AppCard';
@@ -129,7 +129,22 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
   const hasLoadedRef = useRef(dashboardCache.hasData);
   const loadRequestRef = useRef(0);
   const revenueRequestRef = useRef(0);
+  const helloWave = useRef(new Animated.Value(0)).current;
   const revenueMonthOptions = useMemo(() => monthOptions(), []);
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(helloWave, { toValue: 1, duration: 120, useNativeDriver: true }),
+        Animated.timing(helloWave, { toValue: -1, duration: 120, useNativeDriver: true }),
+        Animated.timing(helloWave, { toValue: 1, duration: 120, useNativeDriver: true }),
+        Animated.timing(helloWave, { toValue: 0, duration: 120, useNativeDriver: true }),
+        Animated.delay(700),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [helloWave]);
 
   const load = useCallback(async (options = {}) => {
     const requestId = ++loadRequestRef.current;
@@ -237,7 +252,22 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
 
         <View style={styles.greetingRow}>
           <Text style={styles.hello}>{greet}, {ownerName}</Text>
-          <Icon name="hand-wave-outline" size={22} color={colors.accent} />
+          <Animated.Image
+            source={require('../../../assets/hello.gif')}
+            style={[
+              styles.helloGif,
+              {
+                transform: [
+                  {
+                    rotate: helloWave.interpolate({
+                      inputRange: [-1, 0, 1],
+                      outputRange: ['-14deg', '0deg', '14deg'],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
         </View>
         <Text style={styles.muted}>{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
 
@@ -383,6 +413,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   body: { padding: 16, paddingBottom: 24 },
   hello: { color: colors.text, fontSize: 22, fontWeight: '900' },
+  helloGif: { width: 26, height: 26 },
   greetingRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   muted: { color: colors.muted, marginTop: 4 },
   kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18, marginBottom: 8 },
