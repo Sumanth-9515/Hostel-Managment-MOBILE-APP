@@ -69,8 +69,8 @@ export function SidebarProvider({ children, user, onLogout }) {
   };
 
   const handleLogout = () => {
+    onLogout && onLogout();
     close();
-    setTimeout(() => onLogout && onLogout(), 280);
   };
 
   const openHelp = () => {

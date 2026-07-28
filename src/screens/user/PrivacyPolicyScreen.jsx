@@ -71,10 +71,12 @@ export default function PrivacyPolicyScreen({ navigation }) {
         contentContainerStyle={styles.body}
       >
         <View style={styles.hero}>
-          <View style={styles.heroIcon}>
-            <Icon name="shield-lock-outline" size={30} color={colors.primary} />
+          <View style={styles.heroHead}>
+            <View style={styles.heroIcon}>
+              <Icon name="shield-lock-outline" size={28} color={colors.primary} />
+            </View>
+            <Text style={styles.heroTitle}>Nilayam Privacy Policy</Text>
           </View>
-          <Text style={styles.heroTitle}>Nilayam Privacy Policy</Text>
           <Text style={styles.heroText}>
             We protect hostel, tenant, document, and payment information with responsible access and security practices.
           </Text>
@@ -151,18 +153,23 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     marginBottom: 14,
   },
+  heroHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   heroIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.primarySoft,
-    marginBottom: 12,
   },
   heroTitle: {
+    flex: 1,
     color: colors.text,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '900',
   },
   heroText: {

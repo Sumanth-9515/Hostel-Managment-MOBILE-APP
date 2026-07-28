@@ -52,11 +52,6 @@ export default function AppHeader({ title, subtitle, onMenu, onBack, onLogout, r
             </Pressable>
           </>
         ) : null}
-        {onLogout ? (
-          <Pressable onPress={onLogout} style={styles.iconBtn}>
-            <Icon name="logout" size={20} color={colors.danger} />
-          </Pressable>
-        ) : null}
       </View>
     </SafeAreaView>
   );

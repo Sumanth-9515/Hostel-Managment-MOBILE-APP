@@ -5,9 +5,9 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { colors } from '../utils/constants';
 
 const META = {
-  Dashboard: { icon: 'view-dashboard-outline', label: 'Dashboard' },
+  Dashboard: { icon: 'view-dashboard-outline', label: 'Home' },
   Rent: { icon: 'currency-inr', label: 'Rent' },
-  Onboarding: { icon: 'account-plus-outline', label: 'Onboard' },
+  Onboarding: { icon: 'account-plus-outline', label: 'Add Tenant' },
   Hostels: { icon: 'office-building-outline', label: 'Hostels' },
   AutoMail: { icon: 'email-outline', label: 'AutoMail' },
 };

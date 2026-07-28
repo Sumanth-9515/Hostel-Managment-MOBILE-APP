@@ -59,15 +59,17 @@ function Bar({ value, total, color = colors.primary }) {
   );
 }
 
-function Kpi({ icon, label, value, sub, color }) {
+function Kpi({ icon, label, value, sub, color, amount }) {
   return (
-    <View style={[styles.kpi, { borderTopColor: color }]}>
-      <View style={[styles.kpiIcon, { backgroundColor: `${color}18` }]}>
-        <Icon name={icon} size={18} color={color} />
+    <View style={[styles.kpi, { borderColor: `${color}20` }]}>
+      <View style={[styles.kpiIcon, { borderColor: `${color}24` }]}>
+        <Icon name={icon} size={20} color={color} />
       </View>
-      <Text style={styles.kpiValue} numberOfLines={1}>{value}</Text>
-      <Text style={styles.kpiLabel}>{label}</Text>
-      {sub ? <Text style={styles.kpiSub}>{sub}</Text> : null}
+      <View style={styles.kpiContent}>
+        <Text style={[styles.kpiValue, amount && styles.kpiAmount]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.48}>{value}</Text>
+        <Text style={styles.kpiLabel} numberOfLines={2}>{label}</Text>
+        {sub ? <Text style={[styles.kpiSub, amount && { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.68}>{sub}</Text> : null}
+      </View>
     </View>
   );
 }
@@ -101,10 +103,13 @@ function DashboardDataSkeleton() {
     <View pointerEvents="none">
       <View style={styles.kpiGrid}>
         {[0, 1, 2, 3].map(i => (
-          <View key={i} style={[styles.kpi, { borderTopColor: '#e4e8ef' }]}>
-            <View style={[styles.skeletonBlock, { width: 34, height: 34, borderRadius: 9 }]} />
-            <View style={[styles.skeletonBlock, { width: '60%', height: 18, marginTop: 8 }]} />
-            <View style={[styles.skeletonBlock, { width: '50%', height: 12, marginTop: 4 }]} />
+          <View key={i} style={[styles.kpi, { borderColor: '#e4e8ef', backgroundColor: colors.surface }]}>
+            <View style={[styles.skeletonBlock, { width: 36, height: 36, borderRadius: 11 }]} />
+            <View style={styles.kpiContent}>
+              <View style={[styles.skeletonBlock, { width: '72%', height: 18 }]} />
+              <View style={[styles.skeletonBlock, { width: '84%', height: 11, marginTop: 7 }]} />
+              <View style={[styles.skeletonBlock, { width: '62%', height: 9, marginTop: 5 }]} />
+            </View>
           </View>
         ))}
       </View>
@@ -250,10 +255,13 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
   const hasData = dashboardCache.hasData;
   const showSkeleton = dataLoading && !hasData;
   const showError = !!dataError && !dataLoading && !hasData;
+  const isCurrentMonth = selectedMonth === currentMonthValue();
+  const collectedLabel = isCurrentMonth ? 'Collected this month' : 'Collected';
+  const pendingLabel = isCurrentMonth ? 'Pending this month' : 'Pending';
 
   return (
     <View style={styles.screen}>
-      <AppHeader title="Dashboard" subtitle="Hostel snapshot" onMenu={open} onLogout={onLogout} showOnboardingNotifications />
+      <AppHeader title="" subtitle="Hostel Management" onMenu={open} onLogout={onLogout} showOnboardingNotifications />
       <ScrollView
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}
@@ -287,9 +295,9 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
             {/* KPI strip */}
             <View style={styles.kpiGrid}>
               <Kpi icon="bed" label="Total Beds" value={totalBeds} sub={`${availableBeds} available`} color={colors.info} />
-              <Kpi icon="account-group" label="Tenants" value={totalTenants} color={colors.violet} />
-              <Kpi icon="cash-check" label="Collected" value={monthlyRevenueLoading ? 'Loading...' : money(collected)} sub={monthlyRevenueLoading ? 'Fetching month' : `${pct(collected, totalRevenue)}% of target`} color={colors.success} />
-              <Kpi icon="cash-minus" label="Pending" value={monthlyRevenueLoading ? 'Loading...' : money(pending)} sub={monthlyRevenueLoading ? 'Fetching month' : 'Outstanding'} color={colors.danger} />
+              <Kpi icon="account-group" label="Tenants" value={totalTenants} sub="Active" color={colors.violet} />
+              <Kpi amount icon="cash-check" label={collectedLabel} value={monthlyRevenueLoading ? 'Loading...' : money(collected)} color={colors.success} />
+              <Kpi amount icon="cash-minus" label={pendingLabel} value={monthlyRevenueLoading ? 'Loading...' : money(pending)} color={colors.danger} />
             </View>
 
             {/* Monthly revenue */}
@@ -425,12 +433,18 @@ const styles = StyleSheet.create({
   helloGif: { width: 26, height: 26 },
   greetingRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   muted: { color: colors.muted, marginTop: 4 },
-  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18, marginBottom: 8 },
-  kpi: { width: '48%', backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border, borderTopWidth: 3, padding: 14, minHeight: 116 },
-  kpiIcon: { width: 34, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  kpiValue: { color: colors.text, fontSize: 18, fontWeight: '900' },
-  kpiLabel: { color: colors.muted, fontSize: 12, fontWeight: '700', marginTop: 2 },
-  kpiSub: { color: colors.muted, fontSize: 10, marginTop: 2 },
+  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16, marginBottom: 8 },
+  kpi: {
+    width: '48.2%', minHeight: 88, flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 10,
+    shadowColor: '#111827', shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 1,
+  },
+  kpiIcon: { width: 36, height: 36, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
+  kpiContent: { flex: 1, minWidth: 0, justifyContent: 'center', overflow: 'hidden' },
+  kpiValue: { color: colors.text, fontSize: 20, fontWeight: '900', includeFontPadding: false },
+  kpiAmount: { fontSize: 16 },
+  kpiLabel: { color: colors.muted, fontSize: 10.5, fontWeight: '800', marginTop: 4, flexShrink: 1, lineHeight: 13 },
+  kpiSub: { alignSelf: 'flex-start', color: colors.muted, fontSize: 9.5, fontWeight: '800', marginTop: 4 },
   cardTitle: { color: colors.text, fontSize: 15, fontWeight: '900' },
   cardHint: { color: colors.muted, fontSize: 11, marginTop: 2 },
   sectionTitle: { color: colors.text, fontSize: 16, fontWeight: '900' },
