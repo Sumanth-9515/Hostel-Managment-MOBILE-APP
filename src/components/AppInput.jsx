@@ -10,7 +10,7 @@ export default function AppInput({ label, value, onChangeText, placeholder, secu
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder || label}
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor={colors.muted}
         secureTextEntry={secureTextEntry}
         keyboardType={keyboardType}
         multiline={multiline}
@@ -34,7 +34,7 @@ const styles = StyleSheet.create({
   },
   input: {
     minHeight: 48,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 8,

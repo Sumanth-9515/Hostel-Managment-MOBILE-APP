@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StatusBar, StyleSheet, View } from 'react-native';
+import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Video from 'react-native-video';
 import AppNavigator from './src/navigation/AppNavigator';
@@ -15,6 +15,7 @@ const MAX_SPLASH_MS = 8000;
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
+  const colorScheme = useColorScheme();
   const splashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const finishSplash = () => {
@@ -45,7 +46,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={colorScheme === 'dark' && !showSplash ? 'light-content' : 'dark-content'}
         backgroundColor={showSplash ? 'transparent' : colors.surface}
         translucent={showSplash}
       />
