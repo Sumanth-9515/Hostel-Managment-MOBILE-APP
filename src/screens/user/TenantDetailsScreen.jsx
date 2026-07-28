@@ -15,9 +15,14 @@ import { buildingApi } from '../../api/buildingApi';
 import { rentApi } from '../../api/rentApi';
 import { tenantApi } from '../../api/tenantApi';
 import { colors } from '../../utils/constants';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { advancePendingFor, compactLocation, dateText, getMessage, money } from '../../utils/helpers';
 
 const tenantDetailCache = new Map();
+
+registerCacheReset(() => {
+  tenantDetailCache.clear();
+});
 
 const monthText = value => value
   ? new Date(value).toLocaleString('en-IN', { month: 'long', year: 'numeric' })

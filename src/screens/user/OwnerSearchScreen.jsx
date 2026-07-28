@@ -10,6 +10,7 @@ import { buildingApi } from '../../api/buildingApi';
 import { rentApi } from '../../api/rentApi';
 import { tenantApi } from '../../api/tenantApi';
 import { colors } from '../../utils/constants';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { compactLocation, getMessage, money } from '../../utils/helpers';
 
 const RECENT_KEY = 'owner-search-recent-v1';
@@ -21,6 +22,13 @@ const searchCache = {
   rentMap: new Map(),
   rooms: [],
 };
+
+registerCacheReset(() => {
+  searchCache.hasData = false;
+  searchCache.tenants = [];
+  searchCache.rentMap = new Map();
+  searchCache.rooms = [];
+});
 
 function Choice({ label, selected, onPress, icon }) {
   return (

@@ -11,6 +11,7 @@ import { buildingApi } from '../../api/buildingApi';
 import { rentApi } from '../../api/rentApi';
 import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { getMessage, money } from '../../utils/helpers';
 
 const pct = (num, den) => (den > 0 ? Math.round((num / den) * 100) : 0);
@@ -41,6 +42,14 @@ const dashboardCache = {
   selectedMonth: currentMonthValue(),
   monthlyRevenue: null,
 };
+
+registerCacheReset(() => {
+  dashboardCache.hasData = false;
+  dashboardCache.profile = null;
+  dashboardCache.overview = [];
+  dashboardCache.selectedMonth = currentMonthValue();
+  dashboardCache.monthlyRevenue = null;
+});
 
 function Bar({ value, total, color = colors.primary }) {
   return (
@@ -235,7 +244,7 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
   const dueCount = revenueSummary.counts?.Due || 0;
 
   const hour = new Date().getHours();
-  const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const greet = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
   const ownerName = profile?.owner || profile?.name || 'Owner';
 
   const hasData = dashboardCache.hasData;
@@ -251,7 +260,7 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); loadMonthlyRevenue(selectedMonth); }} />}>
 
         <View style={styles.greetingRow}>
-          <Text style={styles.hello}>{greet}, {ownerName}</Text>
+          <Text style={styles.hello}>{greet},{ownerName}..</Text>
           <Animated.Image
             source={require('../../../assets/hello.gif')}
             style={[

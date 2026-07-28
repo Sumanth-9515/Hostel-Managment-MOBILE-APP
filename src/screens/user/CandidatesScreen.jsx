@@ -14,6 +14,7 @@ import { tenantApi } from '../../api/tenantApi';
 import { rentApi } from '../../api/rentApi';
 import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { compactLocation, dateText, getMessage, money } from '../../utils/helpers';
 
 const candidatesCache = {
@@ -22,6 +23,13 @@ const candidatesCache = {
   rentMap: new Map(),
   buildings: [],
 };
+
+registerCacheReset(() => {
+  candidatesCache.hasData = false;
+  candidatesCache.tenants = [];
+  candidatesCache.rentMap = new Map();
+  candidatesCache.buildings = [];
+});
 
 // ---------- Small building blocks ----------
 

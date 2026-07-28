@@ -12,6 +12,7 @@ import { buildingApi } from '../../api/buildingApi';
 import { tenantApi } from '../../api/tenantApi';
 import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { dateText, getMessage, money } from '../../utils/helpers';
 
 const SHARE_OPTIONS = [1, 2, 3, 4, 5, 6];
@@ -31,6 +32,12 @@ const hostelCache = {
   buildings: [],
   usage: null,
 };
+
+registerCacheReset(() => {
+  hostelCache.hasData = false;
+  hostelCache.buildings = [];
+  hostelCache.usage = null;
+});
 
 function Sheet({ visible, title, subtitle, icon, onClose, children, tall = false }) {
   const [mounted, setMounted] = useState(visible);

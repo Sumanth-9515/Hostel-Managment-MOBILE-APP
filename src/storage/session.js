@@ -1,5 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearUserCaches } from '../utils/cacheRegistry';
 
 const TOKEN_KEY = 'token';
 const USER_KEY = 'user';
@@ -66,6 +67,7 @@ export const session = {
     ]);
   },
   async clear({ notify = false } = {}) {
+    clearUserCaches();
     await Promise.all([
       storage.removeItem(TOKEN_KEY),
       storage.removeItem(USER_KEY),

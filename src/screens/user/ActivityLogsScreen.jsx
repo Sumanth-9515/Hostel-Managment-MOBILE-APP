@@ -18,6 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { activityApi } from '../../api/activityApi';
 import { tenantApi } from '../../api/tenantApi';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { dateText, getMessage, pickArray } from '../../utils/helpers';
 
 const filters = ['All', 'Building', 'Floor', 'Room', 'Tenant', 'Rent'];
@@ -26,6 +27,11 @@ const activityCache = {
   hasData: false,
   logs: [],
 };
+
+registerCacheReset(() => {
+  activityCache.hasData = false;
+  activityCache.logs = [];
+});
 
 // ── Light / Dark palettes (self-contained — screen adapts to the OS theme) ──
 const palettes = {

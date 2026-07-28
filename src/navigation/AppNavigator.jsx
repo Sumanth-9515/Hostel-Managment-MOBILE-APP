@@ -8,6 +8,7 @@ import AuthNavigator from './AuthNavigator';
 import UserNavigator from './UserNavigator';
 import MasterNavigator from './MasterNavigator';
 import { registerPushNotifications, unregisterPushNotifications } from '../notifications/pushNotifications';
+import { clearUserCaches } from '../utils/cacheRegistry';
 
 export default function AppNavigator() {
   const [booting, setBooting] = useState(true);
@@ -43,6 +44,7 @@ export default function AppNavigator() {
 
   const actions = useMemo(() => ({
     onAuth: async ({ token, user }) => {
+      clearUserCaches();
       await session.set(token, user);
       setAuth({ token, user });
     },

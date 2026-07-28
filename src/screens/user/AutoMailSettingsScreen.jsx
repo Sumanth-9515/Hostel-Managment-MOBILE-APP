@@ -11,6 +11,7 @@ import { autoMailApi } from '../../api/autoMailApi';
 import { rentApi } from '../../api/rentApi';
 import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { dateText, getMessage } from '../../utils/helpers';
 
 const defaults = {
@@ -51,6 +52,12 @@ const autoMailCache = {
   config: defaults,
   groups: { arrears: [], overdue: [], upcoming: [], advance: [] },
 };
+
+registerCacheReset(() => {
+  autoMailCache.hasData = false;
+  autoMailCache.config = defaults;
+  autoMailCache.groups = { arrears: [], overdue: [], upcoming: [], advance: [] };
+});
 
 function TimeSelect({ value, onChange, disabled }) {
   const [open, setOpen] = useState(false);
@@ -279,16 +286,24 @@ export default function AutoMailSettingsScreen({ onLogout }) {
           <EmptyState title="Unable to load auto mail setup" message={dataError} icon="wifi-alert" />
         ) : (
           <>
-            <AppCard>
-              <View style={styles.masterRow}>
-                <View style={styles.masterIcon}>
-                  <Icon name="lightning-bolt-outline" size={24} color={colors.violet} />
+            <AppCard style={styles.automationCard}>
+              <View style={styles.automationRow}>
+                <View style={styles.automationIcon}>
+                  <Icon name="cog-sync-outline" size={23} color={colors.violet} />
                 </View>
                 <View style={styles.flex}>
-                  <Text style={styles.cardTitle}>Master Scheduler</Text>
-                  <Text style={styles.muted}>Turn the entire automation system on or off</Text>
+                  <View style={styles.automationTopLine}>
+                    <Text style={styles.cardTitle}>Email Automation</Text>
+                    <Text style={[styles.automationBadge, config.isEnabled ? styles.automationBadgeActive : styles.automationBadgePaused]}>
+                      {config.isEnabled ? 'Automation Active' : 'Automation Paused'}
+                    </Text>
+                  </View>
+                  <Text style={styles.automationDescription}>Automatically send rent reminder emails based on your settings.</Text>
                 </View>
-                <Switch value={config.isEnabled} onValueChange={value => set('isEnabled', value)} trackColor={{ false: '#d1d5db', true: '#a78bfa' }} thumbColor={config.isEnabled ? colors.violet : '#f3f4f6'} />
+                <View style={styles.automationSwitch}>
+                  <Text style={[styles.automationSwitchText, config.isEnabled && styles.automationSwitchTextActive]}>{config.isEnabled ? 'Enabled' : 'Disabled'}</Text>
+                  <Switch value={config.isEnabled} onValueChange={value => set('isEnabled', value)} trackColor={{ false: '#d1d5db', true: '#a78bfa' }} thumbColor={config.isEnabled ? colors.violet : '#f3f4f6'} />
+                </View>
               </View>
             </AppCard>
             <AppCard>
@@ -335,4 +350,15 @@ export default function AutoMailSettingsScreen({ onLogout }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg }, body: { padding: 16 }, flex: { flex: 1 }, footer: { height: 90 }, muted: { fontSize: 11, color: colors.muted, marginTop: 2 }, cardTitle: { fontSize: 16, fontWeight: '900', color: colors.text }, cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }, masterRow: { flexDirection: 'row', alignItems: 'center', gap: 11 }, masterIcon: { width: 44, height: 44, borderRadius: 13, backgroundColor: colors.violetSoft, alignItems: 'center', justifyContent: 'center' }, policy: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 12, marginBottom: 11 }, disabled: { opacity: .5 }, policyTop: { flexDirection: 'row', alignItems: 'center', gap: 9 }, policyIcon: { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }, titleLine: { flexDirection: 'row', alignItems: 'center', gap: 6 }, policyTitle: { color: colors.text, fontSize: 13, fontWeight: '900' }, count: { fontSize: 10, fontWeight: '900', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, overflow: 'hidden' }, timeBox: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 10 }, timeSelect: { height: 54, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.faint, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10 }, timeSelectDisabled: { opacity: .5 }, timeIcon: { width: 34, height: 34, borderRadius: 9, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' }, timeLabel: { color: colors.muted, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }, timeValue: { color: colors.text, fontSize: 15, fontWeight: '900', marginTop: 2 }, modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.5)' }, timeModal: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, paddingBottom: 26 }, modalHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }, modalTitle: { color: colors.text, fontSize: 18, fontWeight: '900' }, closeButton: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center' }, timeOption: { height: 48, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, paddingHorizontal: 12, marginBottom: 6, backgroundColor: colors.faint, borderWidth: 1, borderColor: colors.border }, timeOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft }, timeOptionText: { color: colors.text, fontSize: 15, fontWeight: '800' }, timePreview: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.primarySoft, marginBottom: 12 }, timePreviewText: { color: colors.primary, fontSize: 25, fontWeight: '900' }, periodRow: { flexDirection: 'row', gap: 8, marginBottom: 12 }, periodBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: colors.faint, borderWidth: 1, borderColor: colors.border }, periodBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary }, periodText: { color: colors.text, fontSize: 13, fontWeight: '900' }, periodTextActive: { color: '#fff' }, pickerLabel: { color: colors.muted, fontSize: 10, fontWeight: '900', textTransform: 'uppercase', marginBottom: 7 }, timeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 12 }, timeChip: { width: '22.8%', alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: colors.faint, borderWidth: 1, borderColor: colors.border }, minuteRow: { flexDirection: 'row', gap: 7, marginBottom: 14 }, minuteChip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: colors.faint, borderWidth: 1, borderColor: colors.border }, timeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary }, timeChipText: { color: colors.text, fontSize: 13, fontWeight: '900' }, timeChipTextActive: { color: '#fff' }, timeActions: { flexDirection: 'row', gap: 9 }, lastRun: { width: 92 }, lastLabel: { fontSize: 9, color: colors.muted, fontWeight: '800' }, lastValue: { fontSize: 10, color: colors.text, fontWeight: '700', marginTop: 3 }, targetGroup: { marginTop: 8, marginBottom: 14 }, groupHead: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 7 }, groupTitle: { color: colors.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' }, tenantRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }, avatar: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, avatarText: { fontWeight: '900' }, tenantName: { fontSize: 13, color: colors.text, fontWeight: '800' }, sentBox: { alignItems: 'flex-end' }, sentLabel: { fontSize: 9, color: colors.success, fontWeight: '900' }, sentDate: { fontSize: 9, color: colors.muted, marginTop: 2 }, noPolicies: { alignItems: 'center', paddingVertical: 24, backgroundColor: colors.faint, borderRadius: 13 }, noTitle: { color: colors.muted, fontWeight: '800', marginTop: 7 },
   skeletonBlock: { backgroundColor: '#e4e8ef', borderRadius: 8 },
+  automationCard: { borderWidth: 1, borderColor: '#ddd6fe', padding: 13, shadowColor: colors.violet, shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 3 },
+  automationRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  automationIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: colors.violetSoft, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#ede9fe' },
+  automationTopLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7 },
+  automationDescription: { color: colors.muted, fontSize: 11, lineHeight: 15, marginTop: 3 },
+  automationBadge: { fontSize: 9, fontWeight: '900', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, overflow: 'hidden' },
+  automationBadgeActive: { color: colors.violet, backgroundColor: colors.violetSoft },
+  automationBadgePaused: { color: colors.muted, backgroundColor: colors.faint },
+  automationSwitch: { alignItems: 'center', gap: 3 },
+  automationSwitchText: { color: colors.muted, fontSize: 10, fontWeight: '900' },
+  automationSwitchTextActive: { color: colors.violet },
 });

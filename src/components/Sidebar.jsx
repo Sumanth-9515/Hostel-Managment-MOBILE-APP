@@ -64,8 +64,8 @@ export function SidebarProvider({ children, user, onLogout }) {
   }, [close, visible]);
 
   const go = route => {
+    navRef.navigate(route);
     close();
-    setTimeout(() => navRef.navigate(route), 280);
   };
 
   const handleLogout = () => {

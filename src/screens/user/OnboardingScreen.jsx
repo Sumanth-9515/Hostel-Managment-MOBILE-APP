@@ -10,6 +10,7 @@ import { useSidebar } from '../../components/Sidebar';
 import { tenantApi } from '../../api/tenantApi';
 import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors, ONBOARDING_PUBLIC_URL } from '../../utils/constants';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { compactLocation, dateText, getMessage, money } from '../../utils/helpers';
 
 const onboardingCache = {
@@ -17,6 +18,12 @@ const onboardingCache = {
   tenants: [],
   link: '',
 };
+
+registerCacheReset(() => {
+  onboardingCache.hasData = false;
+  onboardingCache.tenants = [];
+  onboardingCache.link = '';
+});
 
 // ---------- Small building blocks ----------
 

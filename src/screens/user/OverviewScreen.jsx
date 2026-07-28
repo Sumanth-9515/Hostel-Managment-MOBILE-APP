@@ -11,6 +11,7 @@ import Loading from '../../components/Loading';
 import { buildingApi } from '../../api/buildingApi';
 import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { dateText, getMessage, money } from '../../utils/helpers';
 
 const MODES = [
@@ -25,6 +26,12 @@ const overviewCache = {
   stats: [],
   buildings: [],
 };
+
+registerCacheReset(() => {
+  overviewCache.hasData = false;
+  overviewCache.stats = [];
+  overviewCache.buildings = [];
+});
 
 function Choice({ label, selected, onPress }) {
   return (

@@ -16,6 +16,7 @@ import { useToast } from '../../components/AppToast';
 import { rentApi } from '../../api/rentApi';
 import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
+import { registerCacheReset } from '../../utils/cacheRegistry';
 import { advancePendingFor, compactLocation, dateText, getMessage, mergeAdvanceIntoDueItems, money } from '../../utils/helpers';
 
 const PAGE_LIMIT = 15;
@@ -29,6 +30,15 @@ const rentScreenCache = {
   page: 1,
   totalPages: 1,
 };
+
+registerCacheReset(() => {
+  rentScreenCache.hasData = false;
+  rentScreenCache.items = [];
+  rentScreenCache.allItems = [];
+  rentScreenCache.stats = {};
+  rentScreenCache.page = 1;
+  rentScreenCache.totalPages = 1;
+});
 
 const PAYMENT_STATUS_OPTIONS = [
   { value: 'all', label: 'All' },
