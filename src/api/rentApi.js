@@ -16,6 +16,17 @@ const paymentCorrection = async ({ recordId, tenantId, monthYear, rentAmount, pa
   return response.data;
 };
 
+const advanceCorrection = async ({ tenantId, advanceAmount, paidAdvanceAmount, note }) => {
+  if (!tenantId) throw new Error('Missing tenant id.');
+  try {
+    const response = await api.put(`/rent/advance/${tenantId}`, { advanceAmount, paidAdvanceAmount, note });
+    return response.data;
+  } catch (error) {
+    if (error?.response?.status !== 404) throw error;
+  }
+  return paymentCorrection({ tenantId, monthYear: 'advance', paidAmount: paidAdvanceAmount, note });
+};
+
 export const rentApi = {
   due: params => resilientGet('/rent/due', { params }).then(r => r.data),
   dueSearch: q => resilientGet('/rent/due/search', { params: { q } }).then(r => r.data),
@@ -25,5 +36,6 @@ export const rentApi = {
   tenant: tenantId => resilientGet(`/rent/tenant/${tenantId}`).then(r => r.data),
   pay: payload => api.post('/rent/pay', payload).then(r => r.data),
   paymentCorrection,
+  advanceCorrection,
   sendReminder: tenantId => api.post('/rent/send-reminder', { tenantId }).then(r => r.data),
 };

@@ -233,11 +233,12 @@ function EditPaymentModal({ record, onClose, onSave }) {
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
   const rentAmount = Number(record?.rentAmount || 0);
+  const isAdvanceEdit = record?.type === 'advance' || record?.monthYear === 'advance';
 
   const save = async () => {
     const value = Number(paidAmount);
     if (!Number.isFinite(value) || value < 0) return Alert.alert('Invalid amount', 'Enter a valid paid amount.');
-    if (value > rentAmount) return Alert.alert('Amount too high', `Paid amount cannot exceed rent of ${money(rentAmount)}.`);
+    if (value > rentAmount) return Alert.alert('Amount too high', `Paid amount cannot exceed ${isAdvanceEdit ? 'advance' : 'rent'} of ${money(rentAmount)}.`);
     setLoading(true);
     try {
       await onSave({ recordId: record._id || record.id, monthYear: record.monthYear, rentAmount, paidAmount: value, note });
@@ -253,12 +254,12 @@ function EditPaymentModal({ record, onClose, onSave }) {
       <KeyboardAvoid modal style={styles.centerBackdrop}>
         <View style={styles.centerModal}>
           <View style={styles.modalHead}>
-            <Text style={styles.modalTitle}>Edit Payment</Text>
+            <Text style={styles.modalTitle}>{isAdvanceEdit ? 'Edit Advance' : 'Edit Payment'}</Text>
             <Pressable onPress={onClose}><Icon name="close" size={22} color={colors.muted} /></Pressable>
           </View>
-          <Text style={styles.muted}>{monthText(record?.dueDate)}</Text>
+          <Text style={styles.muted}>{isAdvanceEdit ? 'Advance Payment' : monthText(record?.dueDate)}</Text>
           <View style={styles.editTwoCol}>
-            <View style={styles.miniBox}><Text style={styles.miniLabel}>Rent</Text><Text style={styles.miniValue}>{money(rentAmount)}</Text></View>
+            <View style={styles.miniBox}><Text style={styles.miniLabel}>{isAdvanceEdit ? 'Advance' : 'Rent'}</Text><Text style={styles.miniValue}>{money(rentAmount)}</Text></View>
             <View style={styles.miniBox}><Text style={styles.miniLabel}>Current paid</Text><Text style={[styles.miniValue, { color: colors.success }]}>{money(record?.paidAmount || 0)}</Text></View>
           </View>
           <AppInput label="Correct Paid Amount" value={paidAmount} onChangeText={setPaidAmount} keyboardType="numeric" />
@@ -271,6 +272,49 @@ function EditPaymentModal({ record, onClose, onSave }) {
 }
 
 // ── Payment-status filter (segmented chips) ──
+function EditAdvanceModal({ tenant, onClose, onSave }) {
+  const [paidAdvanceAmount, setPaidAdvanceAmount] = useState(String(tenant?.paidAdvanceAmount ?? tenant?.paidadvanceAmount ?? 0));
+  const [note, setNote] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
+  const advanceValue = Number(tenant?.advanceAmount || 0);
+
+  const save = async () => {
+    const paidValue = Number(paidAdvanceAmount);
+    if (!Number.isFinite(paidValue) || paidValue < 0) return Alert.alert('Invalid amount', 'Enter a valid paid advance amount.');
+    if (paidValue > advanceValue) return Alert.alert('Amount too high', `Paid advance cannot exceed advance amount of ${money(advanceValue)}.`);
+    setLoading(true);
+    try {
+      await onSave({ advanceAmount: advanceValue, paidAdvanceAmount: paidValue, note });
+    } catch (error) {
+      showToast(getMessage(error) || 'Advance correction failed', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoid modal style={styles.centerBackdrop}>
+        <View style={styles.centerModal}>
+          <View style={styles.modalHead}>
+            <Text style={styles.modalTitle}>Edit Advance</Text>
+            <Pressable onPress={onClose}><Icon name="close" size={22} color={colors.muted} /></Pressable>
+          </View>
+          <Text style={styles.muted}>{tenant?.name || 'Advance Payment'}</Text>
+          <View style={styles.editTwoCol}>
+            <View style={styles.miniBox}><Text style={styles.miniLabel}>Advance</Text><Text style={styles.miniValue}>{money(tenant?.advanceAmount || 0)}</Text></View>
+            <View style={styles.miniBox}><Text style={styles.miniLabel}>Current paid</Text><Text style={[styles.miniValue, { color: colors.success }]}>{money(tenant?.paidAdvanceAmount ?? tenant?.paidadvanceAmount ?? 0)}</Text></View>
+          </View>
+          <AppInput label="Correct Paid Advance" value={paidAdvanceAmount} onChangeText={setPaidAdvanceAmount} keyboardType="numeric" />
+          <AppInput label="Note" value={note} onChangeText={setNote} />
+          <AppButton title="Save Correction" icon="check" loading={loading} onPress={save} />
+        </View>
+      </KeyboardAvoid>
+    </Modal>
+  );
+}
+
 function PaymentStatusFilter({ value, onChange }) {
   return (
     <View style={styles.filterCard}>
@@ -387,6 +431,7 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [profilePopup, setProfilePopup] = useState(null);
   const [editingPayment, setEditingPayment] = useState(null);
+  const [editingAdvance, setEditingAdvance] = useState(false);
 
   const rentAllRef = useRef([]);
   const hasLoadedRef = useRef(rentScreenCache.hasData);
@@ -595,6 +640,15 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
     showToast('Payment correction saved', 'success');
   };
 
+  const correctAdvance = async payload => {
+    if (!detailId) return;
+    await rentApi.advanceCorrection({ ...payload, tenantId: detailId });
+    setEditingAdvance(false);
+    try { setDetail(await rentApi.tenant(detailId)); } catch {}
+    await refreshData();
+    showToast('Advance correction saved', 'success');
+  };
+
   const whatsapp = item => {
     const phone = item.tenant?.phone?.replace(/\D/g, '');
     Linking.openURL(`https://wa.me/91${phone}?text=${buildWAMessage(item)}`).catch(() => Alert.alert('WhatsApp', 'Unable to open WhatsApp.'));
@@ -756,6 +810,8 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
   const detailTenant = detail?.tenant;
   const detailRemaining = Number(detail?.remaining ?? ((detail?.currentRecord?.rentAmount || 0) - (detail?.currentRecord?.paidAmount || 0)));
   const detailAdvancePending = advancePendingFor({ ...detail, tenant: detailTenant });
+  const detailAdvanceAmount = Number(detailTenant?.advanceAmount || 0);
+  const detailPaidAdvanceAmount = Number(detailTenant?.paidAdvanceAmount ?? detailTenant?.paidadvanceAmount ?? 0);
 
   return (
     <View style={styles.screen}>
@@ -863,17 +919,24 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
                   {Number(detail.arrearsTotal || 0) > 0 ? <Text style={styles.arrearsText}>{money(detail.arrearsTotal)} from previous months</Text> : null}
                 </View>
 
-                {Number(detailTenant?.advanceAmount || 0) > 0 ? (
+                {detailAdvanceAmount > 0 ? (
                   <View style={styles.advanceBox}>
                     <View style={styles.flex}>
                       <Text style={styles.dueLabel}>Advance</Text>
-                      <Text style={styles.advanceValue}>{money(detailTenant?.paidAdvanceAmount ?? detailTenant?.paidadvanceAmount ?? 0)} paid of {money(detailTenant?.advanceAmount || 0)}</Text>
+                      <Text style={styles.advanceValue}>{money(detailPaidAdvanceAmount)} paid of {money(detailAdvanceAmount)}</Text>
                     </View>
-                    {detailAdvancePending > 0 ? (
-                      <Pressable style={styles.smallPay} onPress={() => openPay({ ...detail, tenant: detailTenant, record: detail.currentRecord })}>
-                        <Text style={styles.smallPayText}>Pay {money(detailAdvancePending)}</Text>
-                      </Pressable>
-                    ) : <Text style={[styles.pill, { color: colors.success, backgroundColor: colors.successSoft }]}>Cleared</Text>}
+                    <View style={styles.advanceActionRow}>
+                      {detailPaidAdvanceAmount > 0 ? (
+                        <Pressable style={styles.editPayBtn} onPress={() => setEditingAdvance(true)}>
+                          <Text style={styles.editPayText}>Edit</Text>
+                        </Pressable>
+                      ) : null}
+                      {detailAdvancePending > 0 ? (
+                        <Pressable style={styles.smallPay} onPress={() => openPay({ ...detail, tenant: detailTenant, record: detail.currentRecord })}>
+                          <Text style={styles.smallPayText}>Pay {money(detailAdvancePending)}</Text>
+                        </Pressable>
+                      ) : <Text style={[styles.pill, { color: colors.success, backgroundColor: colors.successSoft }]}>Cleared</Text>}
+                    </View>
                   </View>
                 ) : null}
 
@@ -953,6 +1016,10 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
 
       {editingPayment ? (
         <EditPaymentModal record={editingPayment} onClose={() => setEditingPayment(null)} onSave={correctPayment} />
+      ) : null}
+
+      {editingAdvance ? (
+        <EditAdvanceModal tenant={detailTenant} onClose={() => setEditingAdvance(false)} onSave={correctAdvance} />
       ) : null}
 
       <ProfileImagePopup
@@ -1065,6 +1132,7 @@ const styles = StyleSheet.create({
   detailTotal: { color: colors.danger, fontSize: 28, fontWeight: '900', marginTop: 3 },
   arrearsText: { color: colors.danger, fontSize: 11, marginTop: 2 },
   advanceBox: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 14, backgroundColor: colors.accentSoft, marginTop: 12 },
+  advanceActionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   advanceValue: { color: colors.text, fontSize: 14, fontWeight: '800', marginTop: 2 },
   detailSection: { marginTop: 18 },
   sectionTitle: { color: colors.text, fontSize: 15, fontWeight: '900', marginBottom: 8 },

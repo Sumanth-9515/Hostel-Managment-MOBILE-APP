@@ -2,12 +2,12 @@
 import { Appearance } from 'react-native';
 
 // new project
-// export const API_URL = 'https://hostel-management-system-n4kd.onrender.com/api';
-// export const ONBOARDING_PUBLIC_URL = 'https://nilayamhostelmanagement.in.net';
+export const API_URL = 'https://hostel-management-system-n4kd.onrender.com/api';
+export const ONBOARDING_PUBLIC_URL = 'https://nilayamhostelmanagement.in.net';
 
 // KHPB AKKA
-export const API_URL = "https://hostelmanagment-nz5i.onrender.com/api";
-export const ONBOARDING_PUBLIC_URL = 'https://hostel-management-system-sk.netlify.app';
+// export const API_URL = "https://hostelmanagment-nz5i.onrender.com/api";
+// export const ONBOARDING_PUBLIC_URL = 'https://hostel-management-system-sk.netlify.app';
 
 const lightColors = {
   primary: '#4338ca',
