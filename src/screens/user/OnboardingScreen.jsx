@@ -16,12 +16,14 @@ import { compactLocation, dateText, getMessage, money } from '../../utils/helper
 const onboardingCache = {
   hasData: false,
   tenants: [],
+  linkTenants: [],
   link: '',
 };
 
 registerCacheReset(() => {
   onboardingCache.hasData = false;
   onboardingCache.tenants = [];
+  onboardingCache.linkTenants = [];
   onboardingCache.link = '';
 });
 
@@ -283,6 +285,7 @@ export default function OnboardingScreen({ navigation, onLogout }) {
   const [showQr, setShowQr] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [tenants, setTenants] = useState(onboardingCache.tenants);
+  const [linkTenants, setLinkTenants] = useState(onboardingCache.linkTenants);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [documents, setDocuments] = useState(null);
@@ -311,12 +314,18 @@ export default function OnboardingScreen({ navigation, onLogout }) {
     }
     setDataError(null);
     try {
-      const data = await tenantApi.list({ source: 'onboarding-link' });
+      const [allData, linkData] = await Promise.all([
+        tenantApi.list(),
+        tenantApi.list({ source: 'onboarding-link' }).catch(() => []),
+      ]);
       if (requestId !== loadRequestRef.current) return;
-      const safeTenants = Array.isArray(data) ? data : [];
+      const safeTenants = Array.isArray(allData) ? allData : [];
+      const safeLinkTenants = Array.isArray(linkData) ? linkData : [];
       setTenants(safeTenants);
+      setLinkTenants(safeLinkTenants);
       onboardingCache.hasData = true;
       onboardingCache.tenants = safeTenants;
+      onboardingCache.linkTenants = safeLinkTenants;
     } catch (error) {
       if (requestId === loadRequestRef.current) {
         setDataError(getMessage(error));
@@ -350,12 +359,15 @@ export default function OnboardingScreen({ navigation, onLogout }) {
     return match && (status === 'all' || item.status === status);
   }), [tenants, search, status]);
 
-  const stats = useMemo(() => ({
-    total: tenants.length,
-    active: tenants.filter(t => t.status === 'Active').length,
-    allocated: tenants.filter(t => t.buildingId || t.allocationInfo?.buildingName).length,
-    inactive: tenants.filter(t => t.status === 'Inactive').length,
-  }), [tenants]);
+  const stats = useMemo(() => {
+    const linkIds = new Set(linkTenants.map(t => String(t._id)));
+    return {
+      viaLink: linkIds.size,
+      manual: Math.max(0, tenants.length - linkIds.size),
+      active: tenants.filter(t => t.status === 'Active').length,
+      inactive: tenants.filter(t => t.status === 'Inactive').length,
+    };
+  }, [tenants, linkTenants]);
 
   const qrUrl = link ? `https://api.qrserver.com/v1/create-qr-code/?size=360x360&data=${encodeURIComponent(link)}` : '';
 
@@ -385,9 +397,9 @@ export default function OnboardingScreen({ navigation, onLogout }) {
           <>
             {/* KPI row — single card, hairline-divided, no boxes */}
             <View style={styles.kpiRow}>
-              <KPI value={stats.total} label="Via link" />
+              <KPI value={stats.viaLink} label="Via link" />
+              <KPI value={stats.manual} label="Manual add" />
               <KPI value={stats.active} label="Active" />
-              <KPI value={stats.allocated} label="Allocated" />
               <KPI value={stats.inactive} label="Vacated" last />
             </View>
 
@@ -435,7 +447,7 @@ export default function OnboardingScreen({ navigation, onLogout }) {
 
             {/* Candidates section header + search + segmented filters */}
             <View style={styles.sectionHeadRow}>
-              <Text style={styles.sectionTitle}>Self-registered candidates</Text>
+              <Text style={styles.sectionTitle}>Candidates</Text>
               <Text style={styles.cardMeta}>{filtered.length}</Text>
             </View>
 
@@ -481,8 +493,8 @@ export default function OnboardingScreen({ navigation, onLogout }) {
               </Pressable>
             )) : (
               <EmptyState
-                title="No onboarding candidates"
-                message={tenants.length ? 'No candidates match this filter.' : 'Share the onboarding link and registrations will appear here.'}
+                title="No candidates"
+                message={tenants.length ? 'No candidates match this filter.' : 'Add a candidate manually or share the onboarding link.'}
                 icon="account-clock-outline"
               />
             )}
