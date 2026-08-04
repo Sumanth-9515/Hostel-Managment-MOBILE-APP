@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Alert, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -48,9 +48,12 @@ function buildShareMessage(link) {
   return [SHARE_MESSAGE_LINES[0], link, '', SHARE_MESSAGE_LINES[2]].join('\n');
 }
 
-function KPI({ value, label, last }) {
+function KPI({ value, label, icon, color = colors.primary, last }) {
   return (
     <View style={[styles.kpi, !last && styles.kpiDivider]}>
+      <View style={styles.kpiIcon}>
+        <Icon name={icon} size={18} color={color} />
+      </View>
       <Text style={styles.kpiValue}>{value}</Text>
       <Text style={styles.kpiLabel}>{label}</Text>
     </View>
@@ -242,12 +245,97 @@ function ShareModal({ visible, link, onClose }) {
   );
 }
 
+function QrModal({ visible, link, qrUrl, onClose }) {
+  const [qrLoading, setQrLoading] = useState(true);
+  const [qrError, setQrError] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    setQrLoading(true);
+    setQrError(false);
+    if (qrUrl) {
+      Image.prefetch(qrUrl).catch(() => {});
+    }
+  }, [visible, qrUrl]);
+
+  const downloadQr = async () => {
+    try {
+      await Linking.openURL(qrUrl);
+    } catch {
+      Alert.alert('QR download', 'Unable to open QR code for download.');
+    }
+  };
+
+  const previewLink = async () => {
+    try {
+      await Linking.openURL(link);
+    } catch {
+      Alert.alert('Preview failed', 'Unable to open onboarding form.');
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={styles.qrBackdrop} onPress={onClose}>
+        <Pressable style={styles.qrModalCard} onPress={() => {}}>
+          <View style={styles.qrModalHead}>
+            <View style={styles.qrModalTitleRow}>
+              <View style={styles.qrModalIcon}>
+                <Icon name="qrcode" size={22} color={colors.primary} />
+              </View>
+              <View style={styles.flex}>
+                <Text style={styles.qrModalTitle}>Onboarding QR code</Text>
+                <Text style={styles.qrModalSub}>Scan to open the registration form</Text>
+              </View>
+            </View>
+            <Pressable style={styles.close} onPress={onClose} hitSlop={6}>
+              <Icon name="close" size={18} color={colors.muted} />
+            </Pressable>
+          </View>
+
+          <View style={styles.qrPreviewShell}>
+            {qrLoading || qrError ? (
+              <View style={styles.qrLoadingLayer}>
+                <Icon name={qrError ? 'wifi-alert' : 'qrcode-scan'} size={28} color={qrError ? colors.danger : colors.primary} />
+                <Text style={[styles.qrLoadingText, qrError && styles.qrLoadingError]}>
+                  {qrError ? 'QR code failed to load' : 'Generating QR code...'}
+                </Text>
+              </View>
+            ) : null}
+            {qrUrl ? (
+              <Image
+                source={{ uri: qrUrl }}
+                style={[styles.qrPreview, qrLoading && styles.qrPreviewHidden]}
+                onLoadStart={() => { setQrLoading(true); setQrError(false); }}
+                onLoad={() => { setQrLoading(false); setQrError(false); }}
+                onError={() => { setQrLoading(false); setQrError(true); }}
+              />
+            ) : null}
+          </View>
+
+          <View style={styles.qrModalActions}>
+            <Pressable style={styles.qrSecondaryBtn} onPress={previewLink}>
+              <Icon name="open-in-new" size={17} color={colors.primary} />
+              <Text style={styles.qrSecondaryText}>Preview</Text>
+            </Pressable>
+            <Pressable style={styles.qrDownloadBtn} onPress={downloadQr}>
+              <Icon name="download" size={17} color="#fff" />
+              <Text style={styles.qrDownloadText}>Download QR</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function OnboardingDataSkeleton() {
   return (
     <View pointerEvents="none">
       <View style={styles.kpiRow}>
         {[0, 1, 2, 3].map(i => (
           <View key={i} style={[styles.kpi, i < 3 && styles.kpiDivider]}>
+            <View style={[styles.skeletonBlock, { width: 44, height: 44, borderRadius: 14, marginBottom: 8 }]} />
             <View style={[styles.skeletonBlock, { width: 34, height: 18 }]} />
             <View style={[styles.skeletonBlock, { width: 44, height: 10, marginTop: 4 }]} />
           </View>
@@ -380,15 +468,6 @@ export default function OnboardingScreen({ navigation, onLogout }) {
       <AppHeader title="Onboarding Manager" subtitle="Self-registration and candidate tracking" onMenu={open} onLogout={onLogout} showOnboardingNotifications />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
 
-        {/* Add candidate — compact row, not a big banner */}
-        <Pressable style={styles.manualRow} onPress={() => navigation.navigate('AddCandidate')}>
-          <View style={styles.manualIcon}>
-            <Icon name="account-plus-outline" size={18} color={colors.primary} />
-          </View>
-          <Text style={styles.manualTitle}>Add candidate manually</Text>
-          <Icon name="chevron-right" size={18} color={colors.muted} />
-        </Pressable>
-
         {showSkeleton ? (
           <OnboardingDataSkeleton />
         ) : showError ? (
@@ -397,46 +476,44 @@ export default function OnboardingScreen({ navigation, onLogout }) {
           <>
             {/* KPI row — single card, hairline-divided, no boxes */}
             <View style={styles.kpiRow}>
-              <KPI value={stats.viaLink} label="Via link" />
-              <KPI value={stats.manual} label="Manual add" />
-              <KPI value={stats.active} label="Active" />
-              <KPI value={stats.inactive} label="Vacated" last />
+              <KPI value={stats.viaLink} label="Via Link" icon="link-variant" color={colors.primary} />
+              <KPI value={stats.manual} label="Manual Add" icon="account-plus-outline" color={colors.primary} />
+              <KPI value={stats.active} label="Active" icon="account-outline" color={colors.primary} />
+              <KPI value={stats.inactive} label="Vacated" icon="archive-outline" color={colors.primary} last />
             </View>
 
+            <Pressable style={styles.manualRow} onPress={() => navigation.navigate('AddCandidate')}>
+              <View style={styles.manualIcon}>
+                <Icon name="account-plus-outline" size={20} color={colors.primary} />
+              </View>
+              <View style={styles.flex}>
+                <Text style={styles.manualTitle} numberOfLines={1}>Add candidate manually</Text>
+                <Text style={styles.manualSub} numberOfLines={1}>Add candidate details manually</Text>
+              </View>
+              <Icon name="chevron-right" size={22} color={colors.muted} />
+            </Pressable>
+
             {/* Onboarding link — one permanent link per owner, never expires */}
-            <View style={styles.card}>
-              <View style={styles.linkHeadRow}>
-                <Text style={styles.cardTitle}>Onboarding link</Text>
-                <Text style={styles.cardMeta}>{link ? 'Permanent · No expiry' : (linkLoading ? 'Loading…' : 'Unavailable')}</Text>
+            <View style={styles.onboardingRow}>
+              <View style={styles.linkIcon}>
+                <Icon name="link-variant" size={20} color={colors.primary} />
+              </View>
+              <View style={styles.onboardingInfo}>
+                <Text style={styles.cardTitle} numberOfLines={1}>Onboarding link</Text>
+                <Text style={[styles.cardMeta, styles.onboardingSub]} numberOfLines={2}>Generate onboarding link to invite candidates</Text>
               </View>
 
               {link ? (
-                <>
-                  <Text numberOfLines={1} ellipsizeMode="middle" style={styles.link}>{link}</Text>
-                  <View style={styles.linkActionsRow}>
-                    <Pressable style={styles.iconAction} onPress={() => setShareOpen(true)} hitSlop={4}>
-                      <Icon name="share-variant-outline" size={16} color={colors.primary} />
-                      <Text style={styles.iconActionText}>Share</Text>
-                    </Pressable>
-                    <Pressable style={styles.iconAction} onPress={() => setShowQr(v => !v)} hitSlop={4}>
-                      <Icon name="qrcode" size={16} color={colors.primary} />
-                      <Text style={styles.iconActionText}>{showQr ? 'Hide QR' : 'QR code'}</Text>
-                    </Pressable>
-                    <Pressable style={styles.iconAction} onPress={() => Linking.openURL(link)} hitSlop={4}>
-                      <Icon name="open-in-new" size={16} color={colors.primary} />
-                      <Text style={styles.iconActionText}>Preview</Text>
-                    </Pressable>
-                    <Pressable style={styles.regenAction} onPress={loadLink} disabled={linkLoading} hitSlop={4}>
-                      <Icon name="refresh" size={16} color={colors.muted} />
-                    </Pressable>
-                  </View>
-                  {showQr ? (
-                    <View style={styles.qrBox}>
-                      <Image source={{ uri: qrUrl }} style={styles.qr} />
-                      <Text style={styles.qrText}>Scan to open the registration form</Text>
-                    </View>
-                  ) : null}
-                </>
+                <View style={styles.linkActionsRow}>
+                  <Pressable style={styles.iconAction} onPress={() => setShareOpen(true)} hitSlop={4}>
+                    <Icon name="share-variant-outline" size={18} color={colors.primary} />
+                    <Text style={styles.iconActionText}>Share</Text>
+                  </Pressable>
+                  <Pressable style={styles.iconAction} onPress={() => setShowQr(true)} hitSlop={4}>
+                    <Icon name="qrcode" size={18} color={colors.primary} />
+                    <Text style={styles.iconActionText}>QR Code</Text>
+                  </Pressable>
+                </View>
               ) : (
                 <Pressable style={styles.generateRow} onPress={loadLink} disabled={linkLoading}>
                   <Icon name="link-variant" size={16} color="#fff" />
@@ -509,57 +586,82 @@ export default function OnboardingScreen({ navigation, onLogout }) {
         onFullDetails={() => { const id = documents?._id; setDocuments(null); if (id) navigation.navigate('TenantDetails', { tenantId: id }); }}
       />
       <ShareModal visible={shareOpen} link={link} onClose={() => setShareOpen(false)} />
+      <QrModal visible={showQr} link={link} qrUrl={qrUrl} onClose={() => setShowQr(false)} />
     </View>
   );
 }
 
-const RADIUS = 14;
+const RADIUS = 18;
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  body: { padding: 14, gap: 10 },
+  body: { padding: 16, gap: 12 },
   flex: { flex: 1 },
   footer: { height: 70 },
   muted: { fontSize: 11, color: colors.muted, marginTop: 2 },
 
   // Add candidate row
   manualRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: colors.surface, borderRadius: RADIUS,
-    paddingVertical: 11, paddingHorizontal: 12,
+    borderWidth: 1, borderColor: colors.border,
+    minHeight: 84, paddingVertical: 14, paddingHorizontal: 16,
+    shadowColor: '#0f172a', shadowOpacity: 0.05, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 2,
   },
   manualIcon: {
-    width: 32, height: 32, borderRadius: 10,
-    backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center',
+    width: 38, height: 38, borderRadius: 12,
+    borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center',
   },
-  manualTitle: { flex: 1, fontSize: 13.5, color: colors.text, fontWeight: '700' },
+  manualTitle: { fontSize: 14.5, color: colors.text, fontWeight: '800' },
+  manualSub: { fontSize: 11.5, color: colors.muted, marginTop: 4, fontWeight: '600' },
 
   // KPI row
   kpiRow: {
     flexDirection: 'row', backgroundColor: colors.surface, borderRadius: RADIUS,
-    paddingVertical: 12,
+    borderWidth: 1, borderColor: colors.border,
+    minHeight: 88, paddingVertical: 12,
+    shadowColor: '#0f172a', shadowOpacity: 0.05, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 2,
   },
-  kpi: { flex: 1, alignItems: 'center' },
+  kpi: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   kpiDivider: { borderRightWidth: 1, borderRightColor: colors.border },
-  kpiValue: { fontSize: 18, fontWeight: '800', color: colors.text, letterSpacing: -0.3 },
-  kpiLabel: { fontSize: 10, color: colors.muted, marginTop: 2, fontWeight: '600' },
+  kpiIcon: { height: 22, alignItems: 'center', justifyContent: 'center', marginBottom: 5 },
+  kpiValue: { fontSize: 19, fontWeight: '900', color: colors.text },
+  kpiLabel: { fontSize: 10.5, color: colors.muted, marginTop: 2, fontWeight: '700' },
 
   // Generic card
   card: { backgroundColor: colors.surface, borderRadius: RADIUS, padding: 13 },
-  cardTitle: { fontSize: 13.5, color: colors.text, fontWeight: '800' },
-  cardMeta: { fontSize: 11, color: colors.muted, fontWeight: '600' },
+  cardTitle: { fontSize: 14.5, color: colors.text, fontWeight: '800' },
+  cardMeta: { fontSize: 11.5, color: colors.muted, fontWeight: '600' },
 
   // Onboarding link
+  onboardingRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: colors.surface, borderRadius: RADIUS,
+    borderWidth: 1, borderColor: colors.border,
+    minHeight: 90, paddingVertical: 14, paddingHorizontal: 16,
+    shadowColor: '#0f172a', shadowOpacity: 0.05, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 2,
+  },
+  onboardingInfo: { flex: 1, minWidth: 78 },
+  onboardingSub: { marginTop: 4 },
+  linkIcon: {
+    width: 38, height: 38, borderRadius: 12,
+    borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center',
+  },
   linkHeadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   link: {
     fontSize: 11.5, color: colors.primary, fontWeight: '600',
     marginTop: 9, paddingVertical: 8, paddingHorizontal: 10,
     backgroundColor: colors.primarySoft, borderRadius: 9,
   },
-  linkActionsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 9, gap: 16 },
-  iconAction: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  iconActionText: { fontSize: 11.5, color: colors.primary, fontWeight: '700' },
-  regenAction: { marginLeft: 'auto', padding: 2 },
+  linkActionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginLeft: 'auto' },
+  iconAction: {
+    width: 46, height: 46, alignItems: 'center', justifyContent: 'center', gap: 3,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.surface,
+  },
+  iconActionText: { fontSize: 8.5, color: colors.muted, fontWeight: '800', textAlign: 'center' },
+  regenAction: { paddingLeft: 2 },
   qrBox: { alignItems: 'center', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
   qr: { width: 140, height: 140, borderRadius: 8 },
   qrText: { fontSize: 10, color: colors.muted, marginTop: 7 },
@@ -640,6 +742,37 @@ const styles = StyleSheet.create({
   shareSubmit: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.success },
   shareSubmitDisabled: { opacity: 0.7 },
   shareSubmitText: { fontSize: 12.5, color: '#fff', fontWeight: '800' },
+  qrBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 22, backgroundColor: 'rgba(15,23,42,.58)' },
+  qrModalCard: { width: '100%', maxWidth: 420, backgroundColor: colors.surface, borderRadius: 20, padding: 18 },
+  qrModalHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  qrModalTitleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  qrModalIcon: { width: 46, height: 46, borderRadius: 15, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  qrModalTitle: { fontSize: 17, color: colors.text, fontWeight: '900' },
+  qrModalSub: { fontSize: 12, color: colors.muted, marginTop: 3, fontWeight: '600' },
+  qrPreviewShell: {
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: 18, padding: 16, borderRadius: 18,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.faint,
+  },
+  qrPreview: { width: 230, height: 230, borderRadius: 12, backgroundColor: '#fff' },
+  qrPreviewHidden: { opacity: 0 },
+  qrLoadingLayer: {
+    position: 'absolute', width: 230, height: 230, borderRadius: 12,
+    backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', gap: 10, zIndex: 1,
+  },
+  qrLoadingText: { fontSize: 12.5, color: colors.muted, fontWeight: '800' },
+  qrLoadingError: { color: colors.danger },
+  qrModalActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  qrSecondaryBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    minHeight: 46, borderRadius: 12, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  qrSecondaryText: { fontSize: 12.5, color: colors.primary, fontWeight: '800' },
+  qrDownloadBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    minHeight: 46, borderRadius: 12, backgroundColor: colors.primary,
+  },
+  qrDownloadText: { fontSize: 12.5, color: '#fff', fontWeight: '900' },
   skeletonBlock: { backgroundColor: '#e4e8ef', borderRadius: 8 },
   skeletonCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 14, marginBottom: 12 },
 });
