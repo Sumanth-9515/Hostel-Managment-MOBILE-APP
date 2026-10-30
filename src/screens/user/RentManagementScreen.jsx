@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Image, Linking, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import AppButton from '../../components/AppButton';
@@ -10,7 +10,6 @@ import EmailReminderButton from '../../components/EmailReminderButton';
 import EmptyState from '../../components/EmptyState';
 import KeyboardAvoid from '../../components/KeyboardAvoid';
 import ProfileImagePopup from '../../components/ProfileImagePopup';
-import { DetailSkeleton } from '../../components/Skeleton';
 import { useSidebar } from '../../components/Sidebar';
 import { useToast } from '../../components/AppToast';
 import { rentApi } from '../../api/rentApi';
@@ -18,8 +17,9 @@ import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { registerCacheReset } from '../../utils/cacheRegistry';
 import { advancePendingFor, compactLocation, dateText, getMessage, mergeAdvanceIntoDueItems, money } from '../../utils/helpers';
+import { accumulatedDueFor, isUpcomingRent, payableRemainingFor, upcomingAmountFor } from '../../utils/rentCompatibility';
 
-const PAGE_LIMIT = 15;
+const PAGE_LIMIT = 200;
 const FILTER_PAGE_LIMIT = 200;
 
 const rentScreenCache = {
@@ -30,6 +30,7 @@ const rentScreenCache = {
   page: 1,
   totalPages: 1,
 };
+const rentDetailCache = new Map();
 
 registerCacheReset(() => {
   rentScreenCache.hasData = false;
@@ -38,6 +39,7 @@ registerCacheReset(() => {
   rentScreenCache.stats = {};
   rentScreenCache.page = 1;
   rentScreenCache.totalPages = 1;
+  rentDetailCache.clear();
 });
 
 const PAYMENT_STATUS_OPTIONS = [
@@ -56,17 +58,35 @@ const statusTone = {
   Paid: { fg: colors.success, bg: colors.successSoft },
   Partial: { fg: colors.warning, bg: colors.accentSoft },
   Due: { fg: colors.danger, bg: colors.dangerSoft },
+  Upcoming: { fg: colors.info, bg: colors.infoSoft },
 };
 
-const remainingOf = item => Number(item?.remaining ?? ((item?.record?.rentAmount || item?.currentRecord?.rentAmount || 0) - (item?.record?.paidAmount || item?.currentRecord?.paidAmount || 0)));
-const dueValueOf = item => Number(item?.totalAccumulatedDue ?? item?.remaining ?? 0);
+const remainingOf = payableRemainingFor;
+const dueValueOf = accumulatedDueFor;
 const duePriorityOf = item => {
   const remaining = remainingOf(item);
   const hasPreviousDue = item?.hasPreviousPending || (item?.pendingMonths || []).some(pm => (pm.rentAmount || 0) - (pm.paidAmount || 0) > 0);
   if (hasPreviousDue) return 0;
-  if (remaining > 0 && (item?.isOverdue || item?.daysUntilDue === 0)) return 1;
-  if (remaining > 0 && item?.daysUntilDue != null && item.daysUntilDue > 0) return 2;
+  if (remaining > 0 && !isUpcomingRent(item)) return 1;
+  if (remaining > 0 && isUpcomingRent(item)) return 2;
   return 3;
+};
+
+const matchesRentSearch = (item, query) => {
+  const tenant = item?.tenant || {};
+  const allocation = tenant.allocationInfo || {};
+  const searchable = [
+    tenant.name,
+    tenant.phone,
+    tenant.email,
+    allocation.buildingName,
+    allocation.roomNumber,
+    allocation.bedNumber,
+  ]
+    .filter(value => value != null && value !== '')
+    .join(' ')
+    .toLocaleLowerCase('en-IN');
+  return searchable.includes(query.toLocaleLowerCase('en-IN'));
 };
 
 const buildPayable = item => {
@@ -84,7 +104,7 @@ const buildPayable = item => {
   const record = item?.record || item?.currentRecord;
   const currentRemaining = Number(item?.remaining ?? ((record?.rentAmount || 0) - (record?.paidAmount || 0)));
   if (record?.monthYear && currentRemaining > 0 && !options.some(option => option.monthYear === record.monthYear)) {
-    options.push({ key: `rent:${record.monthYear}`, type: 'rent', monthYear: record.monthYear, maxAmount: currentRemaining, label: `${monthText(record.dueDate)} (Current)` });
+    options.push({ key: `rent:${record.monthYear}`, type: 'rent', monthYear: record.monthYear, maxAmount: currentRemaining, label: `${monthText(record.dueDate)} (${isUpcomingRent(item) ? 'Upcoming' : 'Current'})` });
   }
   const advancePending = advancePendingFor(item);
   if (advancePending > 0) options.push({ key: 'advance', type: 'advance', monthYear: null, maxAmount: advancePending, label: 'Advance Amount' });
@@ -406,6 +426,7 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
   const { showToast } = useToast();
   const [dataLoading, setDataLoading] = useState(!rentScreenCache.hasData);
   const [dataError, setDataError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [items, setItems] = useState(rentScreenCache.items);
   const [allItems, setAllItems] = useState(rentScreenCache.allItems);
@@ -415,9 +436,12 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
   const [q, setQ] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
 
   const [locationFilter, setLocationFilter] = useState({ building: '', floor: '', room: '' });
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('all');
+  const isLocationFilter = !!(locationFilter.building || locationFilter.floor !== '' || locationFilter.room);
+  const isFilterMode = isLocationFilter || paymentStatusFilter !== 'all';
 
   const [paying, setPaying] = useState(null);
   const [payOptions, setPayOptions] = useState([]);
@@ -428,7 +452,6 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
 
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [profilePopup, setProfilePopup] = useState(null);
   const [editingPayment, setEditingPayment] = useState(null);
   const [editingAdvance, setEditingAdvance] = useState(false);
@@ -436,6 +459,31 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
   const rentAllRef = useRef([]);
   const hasLoadedRef = useRef(rentScreenCache.hasData);
   const loadRequestRef = useRef(0);
+  const advanceRequestRef = useRef(0);
+  const searchTimerRef = useRef(null);
+  const searchRequestRef = useRef(0);
+  const allDueRequestRef = useRef(null);
+  const detailRequestRef = useRef(0);
+
+  const loadAdvanceData = useCallback(() => {
+    const requestId = ++advanceRequestRef.current;
+    rentApi.all()
+      .then(rentAll => {
+        if (requestId !== advanceRequestRef.current) return;
+        rentAllRef.current = Array.isArray(rentAll) ? rentAll : [];
+        setItems(current => {
+          const merged = mergeAdvanceIntoDueItems(current, rentAllRef.current);
+          rentScreenCache.items = merged;
+          return merged;
+        });
+        setAllItems(current => {
+          const merged = mergeAdvanceIntoDueItems(current, rentAllRef.current);
+          rentScreenCache.allItems = merged;
+          return merged;
+        });
+      })
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async (pageNum = 1, append = false, options = {}) => {
     const requestId = ++loadRequestRef.current;
@@ -446,21 +494,29 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
     }
     setDataError(null);
     try {
-      const [data, rentAll] = await Promise.all([
-        rentApi.due({ page: pageNum, limit: PAGE_LIMIT }),
-        rentApi.all().catch(() => []),
-      ]);
+      const data = await rentApi.due({ page: pageNum, limit: PAGE_LIMIT });
       if (requestId !== loadRequestRef.current) return false;
-      rentAllRef.current = Array.isArray(rentAll) ? rentAll : [];
-      const merged = mergeAdvanceIntoDueItems(data.data || [], rentAllRef.current);
+      const nextTotalPages = data.totalPages || 1;
+      let merged = mergeAdvanceIntoDueItems(data.data || [], rentAllRef.current);
+      if (!append && nextTotalPages > 1) {
+        const remainingPages = await Promise.all(
+          Array.from({ length: nextTotalPages - 1 }, (_, index) => index + 2)
+            .map(nextPage => rentApi.due({ page: nextPage, limit: PAGE_LIMIT }).then(response => response.data || [])),
+        );
+        if (requestId !== loadRequestRef.current) return false;
+        merged = mergeAdvanceIntoDueItems([...(data.data || []), ...remainingPages.flat()], rentAllRef.current);
+      }
       setItems(prev => {
         const nextItems = append ? [...prev, ...merged] : merged;
         rentScreenCache.items = nextItems;
         return nextItems;
       });
+      if (!append) {
+        rentScreenCache.allItems = merged;
+        setAllItems(merged);
+      }
       const nextStats = data.stats || {};
       const nextPage = data.page || pageNum;
-      const nextTotalPages = data.totalPages || 1;
       rentScreenCache.hasData = true;
       rentScreenCache.stats = nextStats;
       rentScreenCache.page = nextPage;
@@ -468,6 +524,7 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
       setStats(nextStats);
       setPage(nextPage);
       setTotalPages(nextTotalPages);
+      if (pageNum === 1) loadAdvanceData();
       return true;
     } catch (error) {
       if (requestId === loadRequestRef.current) {
@@ -477,24 +534,38 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
     } finally {
       if (requestId === loadRequestRef.current) {
         setDataLoading(false);
+        setRefreshing(false);
         setLoadingMore(false);
       }
     }
-  }, []);
+  }, [loadAdvanceData]);
 
   const fetchAllDue = useCallback(async () => {
+    if (allDueRequestRef.current) return allDueRequestRef.current;
+    const request = (async () => {
+      try {
+        const first = await rentApi.due({ page: 1, limit: FILTER_PAGE_LIMIT });
+        const pages = first.totalPages || 1;
+        const rest = await Promise.all(
+          Array.from({ length: Math.max(0, pages - 1) }, (_, i) => i + 2)
+            .map(p => rentApi.due({ page: p, limit: FILTER_PAGE_LIMIT }).then(r => r.data || [])),
+        );
+        const nextAllItems = mergeAdvanceIntoDueItems([...(first.data || []), ...rest.flat()], rentAllRef.current);
+        rentScreenCache.allItems = nextAllItems;
+        setAllItems(nextAllItems);
+        return nextAllItems;
+      } catch {
+        if (!rentScreenCache.hasData) setAllItems([]);
+        return null;
+      }
+    })();
+    allDueRequestRef.current = request;
     try {
-      const first = await rentApi.due({ page: 1, limit: FILTER_PAGE_LIMIT });
-      const pages = first.totalPages || 1;
-      const rest = await Promise.all(
-        Array.from({ length: Math.max(0, pages - 1) }, (_, i) => i + 2)
-          .map(p => rentApi.due({ page: p, limit: FILTER_PAGE_LIMIT }).then(r => r.data || []).catch(() => [])),
-      );
-      const nextAllItems = mergeAdvanceIntoDueItems([...(first.data || []), ...rest.flat()], rentAllRef.current);
-      rentScreenCache.allItems = nextAllItems;
-      setAllItems(nextAllItems);
-    } catch {
-      if (!rentScreenCache.hasData) setAllItems([]);
+      return await request;
+    } finally {
+      if (allDueRequestRef.current === request) {
+        allDueRequestRef.current = null;
+      }
     }
   }, []);
 
@@ -502,54 +573,64 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
     load(1, false, { background: hasLoadedRef.current || rentScreenCache.hasData })
       .then(success => {
         if (success) hasLoadedRef.current = true;
-        return success ? fetchAllDue() : null;
       });
-  }, [load, fetchAllDue]));
+  }, [load]));
 
   useRefreshOnReconnect(useCallback(() => {
-    load(1, false, { background: rentScreenCache.hasData })
-      .then(success => (success ? fetchAllDue() : null));
-  }, [load, fetchAllDue]));
+    load(1, false, { background: rentScreenCache.hasData });
+  }, [load]));
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load(1, false);
+  }, [load]);
 
   // Silent, in-place refresh after a payment/correction — never flips the
   // full-screen loader, keeps the current page set, and only refetches the
   // filter/search source when one is active.
   const refreshData = async () => {
-    try {
-      const limit = PAGE_LIMIT * Math.max(1, page);
-      const [data, rentAll] = await Promise.all([
-        rentApi.due({ page: 1, limit }),
-        rentApi.all().catch(() => []),
-      ]);
-      rentAllRef.current = Array.isArray(rentAll) ? rentAll : [];
-      const nextItems = mergeAdvanceIntoDueItems(data.data || [], rentAllRef.current);
-      const nextStats = data.stats || {};
-      const nextTotalPages = data.total ? Math.ceil(data.total / PAGE_LIMIT) || 1 : 1;
-      rentScreenCache.hasData = true;
-      rentScreenCache.items = nextItems;
-      rentScreenCache.stats = nextStats;
-      rentScreenCache.totalPages = nextTotalPages;
-      setItems(nextItems);
-      setStats(nextStats);
-      setTotalPages(nextTotalPages);
-    } catch {}
-    if (isFilterMode) fetchAllDue();
+    await load(1, false, { background: true });
     if (searchResults !== null && q.trim()) {
-      rentApi.dueSearch(q.trim())
-        .then(res => setSearchResults(mergeAdvanceIntoDueItems(Array.isArray(res) ? res : [], rentAllRef.current)))
-        .catch(() => {});
+      setSearchResults(rentScreenCache.allItems.filter(item => matchesRentSearch(item, q.trim())));
     }
   };
 
   const runSearch = text => {
     setQ(text);
-    if (!text.trim()) { setSearchResults(null); return; }
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    const requestId = ++searchRequestRef.current;
+    const query = text.trim();
+    setSearchError('');
+    if (!query) { setSearchResults(null); setSearchLoading(false); return; }
+
+    const completeList = rentScreenCache.allItems;
+    if (completeList.length) {
+      setSearchResults(completeList.filter(item => matchesRentSearch(item, query)));
+      setSearchLoading(false);
+      return;
+    }
+
     setSearchLoading(true);
-    rentApi.dueSearch(text.trim())
-      .then(res => setSearchResults(mergeAdvanceIntoDueItems(Array.isArray(res) ? res : [], rentAllRef.current)))
-      .catch(error => { setSearchResults([]); Alert.alert('Search failed', getMessage(error)); })
-      .finally(() => setSearchLoading(false));
+    searchTimerRef.current = setTimeout(() => {
+      fetchAllDue()
+        .then(list => {
+          if (requestId !== searchRequestRef.current) return;
+          if (!Array.isArray(list)) {
+            setSearchResults([]);
+            setSearchError('Unable to load all rent records for search. Pull down to retry.');
+            return;
+          }
+          setSearchResults(list.filter(item => matchesRentSearch(item, query)));
+        })
+        .finally(() => {
+          if (requestId === searchRequestRef.current) setSearchLoading(false);
+        });
+    }, 250);
   };
+
+  useEffect(() => () => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+  }, []);
 
   // When opened from an activity log (or elsewhere) with a search term, pre-fill
   // and run the tenant search so only that tenant is shown.
@@ -582,20 +663,27 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
     setAmount(String(option.maxAmount));
   };
 
-  const openDetail = async item => {
+  const openDetail = item => {
     const tenantId = item?.tenant?._id;
     if (!tenantId) return;
+    const requestId = ++detailRequestRef.current;
+    const cachedDetail = rentDetailCache.get(String(tenantId));
+    const previewDetail = cachedDetail || {
+      ...item,
+      currentRecord: item.currentRecord || item.record,
+      pendingMonths: item.pendingMonths || [],
+      history: item.history || [],
+    };
     setDetailId(tenantId);
-    setDetail(null);
-    setDetailLoading(true);
-    try {
-      setDetail(await rentApi.tenant(tenantId));
-    } catch (error) {
-      setDetailId(null);
-      Alert.alert('Tenant details', getMessage(error));
-    } finally {
-      setDetailLoading(false);
-    }
+    setDetail(previewDetail);
+    rentApi.tenant(tenantId)
+      .then(nextDetail => {
+        rentDetailCache.set(String(tenantId), nextDetail);
+        if (requestId === detailRequestRef.current) setDetail(nextDetail);
+      })
+      .catch(error => {
+        if (requestId === detailRequestRef.current) showToast(getMessage(error), 'error');
+      });
   };
 
   const pay = async () => {
@@ -635,7 +723,11 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
     if (!detailId) return;
     await rentApi.paymentCorrection({ ...payload, tenantId: detailId });
     setEditingPayment(null);
-    try { setDetail(await rentApi.tenant(detailId)); } catch {}
+    try {
+      const nextDetail = await rentApi.tenant(detailId);
+      rentDetailCache.set(String(detailId), nextDetail);
+      setDetail(nextDetail);
+    } catch {}
     await refreshData();
     showToast('Payment correction saved', 'success');
   };
@@ -644,7 +736,11 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
     if (!detailId) return;
     await rentApi.advanceCorrection({ ...payload, tenantId: detailId });
     setEditingAdvance(false);
-    try { setDetail(await rentApi.tenant(detailId)); } catch {}
+    try {
+      const nextDetail = await rentApi.tenant(detailId);
+      rentDetailCache.set(String(detailId), nextDetail);
+      setDetail(nextDetail);
+    } catch {}
     await refreshData();
     showToast('Advance correction saved', 'success');
   };
@@ -658,8 +754,6 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
 
   // ── Derived filtered list ──
   const isSearchMode = searchResults !== null;
-  const isLocationFilter = !!(locationFilter.building || locationFilter.floor !== '' || locationFilter.room);
-  const isFilterMode = isLocationFilter || paymentStatusFilter !== 'all';
 
   const applyLocation = list => {
     if (!isLocationFilter) return list;
@@ -683,22 +777,23 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
         case 'advance_pending':
           return advancePendingFor(item) > 0;
         case 'current_month_dues':
-          return remaining > 0 && (item.isOverdue || item.daysUntilDue === 0);
+          return remaining > 0 && !isUpcomingRent(item);
         case 'upcoming_dues':
-          return remaining > 0 && item.daysUntilDue != null && item.daysUntilDue > 0;
+          return remaining > 0 && isUpcomingRent(item);
         default:
           return true;
       }
     });
   };
 
-  const filterSource = isSearchMode ? (searchResults || []) : allItems;
-  const baseItems = isSearchMode ? (searchResults || []) : isFilterMode ? allItems : items;
+  const filterSource = isSearchMode ? (searchResults || []) : (allItems.length ? allItems : items);
+  const hasCompleteDueList = allItems.length > 0;
+  const baseItems = isSearchMode ? (searchResults || []) : hasCompleteDueList ? allItems : items;
   const displayItems = [...applyPaymentStatus(applyLocation(baseItems))]
     .sort((a, b) => {
-      const priority = duePriorityOf(a) - duePriorityOf(b);
-      if (priority !== 0) return priority;
-      return dueValueOf(b) - dueValueOf(a);
+      const dueDifference = dueValueOf(b) - dueValueOf(a);
+      if (dueDifference !== 0) return dueDifference;
+      return duePriorityOf(a) - duePriorityOf(b);
     });
   const overviewSource = allItems.length ? allItems : items;
   const duesOverview = {
@@ -707,11 +802,11 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
     )).length),
     current: overviewSource.filter(item => {
       const remaining = remainingOf(item);
-      return remaining > 0 && (item.isOverdue || item.daysUntilDue === 0);
+      return remaining > 0 && !isUpcomingRent(item);
     }).length,
     upcoming: Number(stats.totalDueSoon ?? overviewSource.filter(item => {
       const remaining = remainingOf(item);
-      return remaining > 0 && item.daysUntilDue != null && item.daysUntilDue > 0;
+      return remaining > 0 && isUpcomingRent(item);
     }).length),
     pendingAmount: Number(stats.totalPendingAmount ?? overviewSource.reduce((sum, item) => sum + dueValueOf(item), 0)),
     totalAlerts: Number(stats.totalAlerts ?? overviewSource.length),
@@ -739,14 +834,16 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
 
     const record = item.record || item.currentRecord;
     const remaining = remainingOf(item);
+    const isUpcoming = isUpcomingRent(item);
+    const upcomingAmount = upcomingAmountFor(item);
     const advancePending = advancePendingFor(item);
     const advanceOnly = advancePending > 0 && !item.hasPreviousPending && remaining <= 0;
-    const overdue = !advanceOnly && (item.hasPreviousPending || item.isOverdue);
+    const overdue = !advanceOnly && (item.hasPreviousPending || (!isUpcoming && item.isOverdue));
     const photo = item.tenant?.documents?.passportPhoto;
     const advanceExpected = Number(item.advanceAmount ?? item.tenant?.advanceAmount ?? 0);
     return (
       <Pressable onPress={() => openDetail(item)} accessibilityRole="button" accessibilityLabel={`View rent details for ${item.tenant?.name}`}>
-        <AppCard style={overdue ? styles.cardOverdue : null}>
+        <AppCard style={styles.rentCard}>
           <View style={styles.top}>
             <Pressable
               disabled={!photo}
@@ -763,23 +860,24 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
               <Text style={styles.name} numberOfLines={1}>{item.tenant?.name}</Text>
               <Text style={styles.muted}>{item.tenant?.phone}</Text>
             </View>
-            {advanceOnly ? (
-              <Text style={styles.badgeSoon}>Adv pending</Text>
-            ) : item.hasPreviousPending ? (
-              <Text style={styles.badgeOverdue}>{item.pendingMonthsCount || ''} Overdue</Text>
-            ) : item.isOverdue ? (
-              <Text style={styles.badgeOverdue}>{item.daysOverdue}d overdue</Text>
-            ) : item.daysUntilDue != null ? (
-              <Text style={styles.badgeSoon}>Due {item.daysUntilDue === 0 ? 'today' : `${item.daysUntilDue}d`}</Text>
-            ) : null}
+            <View style={styles.badgeStack}>
+              {advanceOnly ? <Text style={styles.badgeSoon}>Adv pending</Text> : null}
+              {item.hasPreviousPending ? <Text style={styles.badgeOverdue}>{item.pendingMonthsCount || ''} Overdue</Text> : null}
+              {!item.hasPreviousPending && !advanceOnly && !isUpcoming && item.isOverdue ? <Text style={styles.badgeOverdue}>{item.daysOverdue}d overdue</Text> : null}
+              {isUpcoming ? <Text style={styles.badgeSoon}>Upcoming Rent</Text> : null}
+              {!item.hasPreviousPending && !advanceOnly && !isUpcoming && !item.isOverdue && item.daysUntilDue != null ? (
+                <Text style={styles.badgeSoon}>Due {item.daysUntilDue === 0 ? 'today' : `${item.daysUntilDue}d`}</Text>
+              ) : null}
+            </View>
           </View>
 
           <Text style={styles.location}>{compactLocation(item.tenant)}</Text>
 
           <View style={styles.dueRow}>
             <View>
-              <Text style={styles.dueLabel}>Total accumulated due</Text>
-              <Text style={[styles.due, overdue && { color: colors.danger }]}>{money(item.totalAccumulatedDue || item.remaining || 0)}</Text>
+              <Text style={styles.dueLabel}>Pending Due</Text>
+              <Text style={[styles.due, overdue && { color: colors.danger }]}>{money(accumulatedDueFor(item))}</Text>
+              {isUpcoming ? <Text style={styles.upcomingAmount}>Upcoming rent {money(upcomingAmount)}</Text> : null}
               {advanceExpected > 0 ? (
                 <View style={styles.advanceBelowDue}>
                   <AdvanceBadge expected={advanceExpected} paid={item.paidAdvanceAmount ?? item.tenant?.paidAdvanceAmount ?? item.paidadvanceAmount ?? item.tenant?.paidadvanceAmount} />
@@ -809,6 +907,8 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
 
   const detailTenant = detail?.tenant;
   const detailRemaining = Number(detail?.remaining ?? ((detail?.currentRecord?.rentAmount || 0) - (detail?.currentRecord?.paidAmount || 0)));
+  const detailIsUpcoming = isUpcomingRent(detail);
+  const detailUpcomingAmount = upcomingAmountFor(detail);
   const detailAdvancePending = advancePendingFor({ ...detail, tenant: detailTenant });
   const detailAdvanceAmount = Number(detailTenant?.advanceAmount || 0);
   const detailPaidAdvanceAmount = Number(detailTenant?.paidAdvanceAmount ?? detailTenant?.paidadvanceAmount ?? 0);
@@ -822,11 +922,13 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListHeaderComponent={(
           <>
             <DuesOverview overview={duesOverview} />
             <AppInput label="Search tenant by name" value={q} onChangeText={runSearch} />
             {searchLoading ? <Text style={styles.muted}>Searching…</Text> : null}
+            {searchError ? <Text style={styles.searchError}>{searchError}</Text> : null}
             <PaymentStatusFilter value={paymentStatusFilter} onChange={setPaymentStatusFilter} />
             <LocationFilter items={filterSource} value={locationFilter} onChange={setLocationFilter} />
             {isFilterMode && !isSearchMode ? (
@@ -843,7 +945,7 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
         )}
         renderItem={renderItem}
         ListFooterComponent={
-          !showRentSkeleton && !showRentError && !isSearchMode && !isFilterMode && page < totalPages ? (
+          !showRentSkeleton && !showRentError && !isSearchMode && !isFilterMode && !hasCompleteDueList && page < totalPages ? (
             <AppButton title="Load More" icon="chevron-down" variant="secondary" style={styles.more} loading={loadingMore} onPress={() => load(page + 1, true)} />
           ) : <View style={styles.footerSpacer} />
         }
@@ -860,7 +962,7 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
               </View>
               <Pressable style={styles.closeButton} onPress={() => setDetailId(null)}><Icon name="close" size={22} color={colors.muted} /></Pressable>
             </View>
-            {detailLoading ? <DetailSkeleton /> : detail ? (
+            {detail ? (
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.detailContent} keyboardShouldPersistTaps="handled">
                 <View style={styles.tenantHero}>
                   <Pressable
@@ -914,9 +1016,11 @@ export default function RentManagementScreen({ navigation, route, onLogout }) {
                 </View>
 
                 <View style={styles.totalBox}>
-                  <Text style={styles.dueLabel}>Total accumulated due</Text>
-                  <Text style={styles.detailTotal}>{money(detail.totalAccumulatedDue || 0)}</Text>
+                  <Text style={styles.dueLabel}>Pending Due</Text>
+                  <Text style={styles.detailTotal}>{money(accumulatedDueFor(detail))}</Text>
                   {Number(detail.arrearsTotal || 0) > 0 ? <Text style={styles.arrearsText}>{money(detail.arrearsTotal)} from previous months</Text> : null}
+                  {!detailIsUpcoming && detailRemaining > 0 ? <Text style={styles.currentDueText}>Currently due {money(detailRemaining)}</Text> : null}
+                  {detailIsUpcoming ? <Text style={styles.upcomingAmount}>Upcoming rent {money(detailUpcomingAmount)}</Text> : null}
                 </View>
 
                 {detailAdvanceAmount > 0 ? (
@@ -1079,15 +1183,26 @@ const styles = StyleSheet.create({
   skeletonIcon: { width: 42, height: 42, borderRadius: 10, backgroundColor: colors.faint },
   skeletonPayBtn: { flex: 1, height: 42, borderRadius: 10, backgroundColor: colors.faint },
 
-  cardOverdue: { borderWidth: 1, borderColor: colors.dangerSoft, backgroundColor: colors.dangerSoft },
+  rentCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+    elevation: 0,
+    shadowOpacity: 0.04,
+    shadowRadius: 7,
+    shadowOffset: { width: 0, height: 3 },
+  },
   top: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   cardAvatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: colors.primarySoft },
   cardAvatarFallback: { backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   cardAvatarText: { color: colors.primary, fontSize: 18, fontWeight: '900' },
   name: { color: colors.text, fontSize: 17, fontWeight: '900' },
   muted: { color: colors.muted, marginTop: 4 },
+  searchError: { color: colors.danger, fontSize: 11, marginTop: 4 },
   badgeOverdue: { color: colors.danger, backgroundColor: colors.dangerSoft, fontSize: 11, fontWeight: '900', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, overflow: 'hidden' },
   badgeSoon: { color: colors.warning, backgroundColor: colors.accentSoft, fontSize: 11, fontWeight: '900', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, overflow: 'hidden' },
+  badgeStack: { alignItems: 'flex-end', gap: 4 },
   location: { color: colors.primary, fontWeight: '800', marginTop: 10, fontSize: 12 },
   statusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   pill: { fontSize: 11, fontWeight: '800', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
@@ -1099,6 +1214,7 @@ const styles = StyleSheet.create({
   dueRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10 },
   dueLabel: { color: colors.muted, fontSize: 11, textTransform: 'uppercase' },
   due: { color: colors.text, fontSize: 22, fontWeight: '900' },
+  upcomingAmount: { color: colors.info, fontSize: 12, fontWeight: '800', marginTop: 3 },
   iconRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 },
   iconBtn: { width: 42, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   payBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42, borderRadius: 10, backgroundColor: colors.primary },
@@ -1131,6 +1247,7 @@ const styles = StyleSheet.create({
   totalBox: { padding: 16, borderRadius: 14, backgroundColor: colors.dangerSoft, marginTop: 14 },
   detailTotal: { color: colors.danger, fontSize: 28, fontWeight: '900', marginTop: 3 },
   arrearsText: { color: colors.danger, fontSize: 11, marginTop: 2 },
+  currentDueText: { color: colors.warning, fontSize: 12, fontWeight: '800', marginTop: 3 },
   advanceBox: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 14, backgroundColor: colors.accentSoft, marginTop: 12 },
   advanceActionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   advanceValue: { color: colors.text, fontSize: 14, fontWeight: '800', marginTop: 2 },

@@ -13,6 +13,7 @@ import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { registerCacheReset } from '../../utils/cacheRegistry';
 import { dateText, getMessage } from '../../utils/helpers';
+import { accumulatedDueFor, isUpcomingRent, payableRemainingFor } from '../../utils/rentCompatibility';
 
 const defaults = {
   isEnabled: false,
@@ -209,12 +210,12 @@ export default function AutoMailSettingsScreen({ onLogout }) {
       if (requestId !== loadRequestRef.current) return;
       const next = { arrears: [], overdue: [], upcoming: [], advance: [] };
       (Array.isArray(rent) ? rent : []).forEach(item => {
-        if (!item?.tenant || Number(item.totalAccumulatedDue || 0) <= 0) return;
-        const rentOutstanding = Number(item.arrearsTotal || 0) + Number(item.remaining || 0);
+        if (!item?.tenant) return;
+        const rentOutstanding = accumulatedDueFor(item) + payableRemainingFor(item);
         if (Number(item.pendingAdvanceAmount ?? item.advancePending ?? 0) > 0 && rentOutstanding <= 0) next.advance.push(item.tenant);
         else if (item.hasPreviousPending) next.arrears.push(item.tenant);
+        else if (isUpcomingRent(item)) next.upcoming.push(item.tenant);
         else if (item.isOverdue) next.overdue.push(item.tenant);
-        else if (item.daysUntilDue != null && item.daysUntilDue <= 5) next.upcoming.push(item.tenant);
       });
       const safeConfig = { ...defaults, ...saved };
       setConfig(safeConfig);

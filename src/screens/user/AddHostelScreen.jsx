@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Easing, FlatList, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, FlatList, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import AppButton from '../../components/AppButton';
@@ -7,6 +7,8 @@ import AppHeader from '../../components/AppHeader';
 import AppInput from '../../components/AppInput';
 import EmptyState from '../../components/EmptyState';
 import KeyboardAvoid from '../../components/KeyboardAvoid';
+import ProfileImagePopup from '../../components/ProfileImagePopup';
+import { useToast } from '../../components/AppToast';
 import { useSidebar } from '../../components/Sidebar';
 import { buildingApi } from '../../api/buildingApi';
 import { tenantApi } from '../../api/tenantApi';
@@ -136,8 +138,9 @@ function HostelDataSkeleton() {
   );
 }
 
-export default function AddHostelScreen({ onLogout }) {
+export default function AddHostelScreen({ navigation, onLogout }) {
   const { open } = useSidebar();
+  const { showToast } = useToast();
   const [dataLoading, setDataLoading] = useState(!hostelCache.hasData);
   const [dataError, setDataError] = useState(null);
   const [buildings, setBuildings] = useState(hostelCache.buildings);
@@ -146,6 +149,7 @@ export default function AddHostelScreen({ onLogout }) {
   const [floor, setFloor] = useState(null);
   const [room, setRoom] = useState(null);
   const [tenant, setTenant] = useState(null);
+  const [profilePopup, setProfilePopup] = useState(null);
   const [level, setLevel] = useState(null);
   const [formType, setFormType] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -153,6 +157,7 @@ export default function AddHostelScreen({ onLogout }) {
   const [fForm, setFForm] = useState(emptyFloor);
   const [rForm, setRForm] = useState(emptyRoom);
   const [saving, setSaving] = useState(false);
+  const [bedSaving, setBedSaving] = useState(false);
   const [planInfo, setPlanInfo] = useState(null);
   const [overflowBuilding, setOverflowBuilding] = useState(null);
 
@@ -234,6 +239,12 @@ export default function AddHostelScreen({ onLogout }) {
   const save = async () => {
     setSaving(true);
     try {
+      const action = editing ? 'updated' : 'added';
+      const savedLabel = formType === 'building'
+        ? `Building ${bForm.buildingName.trim()}`
+        : formType === 'floor'
+          ? `Floor ${fForm.floorNumber}`
+          : `Room ${rForm.roomNumber.trim()}`;
       if (formType === 'building') {
         if (!bForm.buildingName.trim()) throw new Error('Building name is required.');
         if (editing) await buildingApi.update(editing._id, bForm); else await buildingApi.create(bForm);
@@ -247,6 +258,7 @@ export default function AddHostelScreen({ onLogout }) {
         if (editing) await buildingApi.updateRoom(building._id, floor._id, editing._id, payload); else await buildingApi.addRoom(building._id, floor._id, payload);
       }
       setFormType(null); setEditing(null); await refresh();
+      showToast(`${savedLabel} ${action} successfully`, 'success');
     } catch (error) {
       if (error?.response?.data?.planLimitExceeded) { setFormType(null); showPlanError(error); }
       else Alert.alert('Unable to save', getMessage(error));
@@ -268,10 +280,18 @@ export default function AddHostelScreen({ onLogout }) {
 
   const addBed = async () => {
     if (usage?.bedLimit != null && usage.remainingBeds === 0) return setPlanInfo(usage);
+    setBedSaving(true);
     try {
-      await buildingApi.updateRoom(building._id, floor._id, room._id, { roomNumber: room.roomNumber, shareType: (room.beds?.length || 0) + 1 });
+      const nextBedNumber = (room.beds?.length || 0) + 1;
+      await buildingApi.updateRoom(building._id, floor._id, room._id, { roomNumber: room.roomNumber, shareType: nextBedNumber });
       await refresh();
-    } catch (error) { if (error?.response?.data?.planLimitExceeded) showPlanError(error); else Alert.alert('Unable to add bed', getMessage(error)); }
+      showToast(`Bed ${nextBedNumber} added successfully`, 'success');
+    } catch (error) {
+      if (error?.response?.data?.planLimitExceeded) showPlanError(error);
+      else Alert.alert('Unable to add bed', getMessage(error));
+    } finally {
+      setBedSaving(false);
+    }
   };
 
   const removeBed = bed => {
@@ -284,7 +304,8 @@ export default function AddHostelScreen({ onLogout }) {
     if (bed.status !== 'Occupied' || !bed.tenantId) return;
     try {
       const id = typeof bed.tenantId === 'object' ? bed.tenantId._id : bed.tenantId;
-      setTenant(typeof bed.tenantId === 'object' && bed.tenantId.name ? bed.tenantId : await tenantApi.get(id));
+      if (typeof bed.tenantId === 'object' && bed.tenantId.name) setTenant(bed.tenantId);
+      setTenant(await tenantApi.get(id));
     } catch (error) { Alert.alert('Tenant details', getMessage(error)); }
   };
 
@@ -335,13 +356,13 @@ export default function AddHostelScreen({ onLogout }) {
 
         {level === 'rooms' ? <>
           <View style={styles.sheetAction}><AppButton title="Add Room" icon="plus" onPress={() => openRoomForm(null)} /></View>
-          <ScrollView contentContainerStyle={styles.sheetList}>{(floor?.rooms || []).length ? floor.rooms.map(item => { const occupied = item.beds?.filter(b => b.status === 'Occupied').length || 0; return <Pressable key={item._id} style={styles.listCard} onPress={() => { setRoom(item); setLevel('beds'); }}>
-            <View style={styles.listIcon}><Icon name="door" size={20} color={colors.primary} /></View><View style={styles.flex}><Text style={styles.listTitle}>Room {item.roomNumber}</Text><Text style={styles.muted}>{item.shareType}-share · {occupied}/{item.beds?.length || 0} occupied</Text></View><IconAction icon="pencil-outline" color={colors.primary} onPress={() => openRoomForm(item)} /><IconAction icon="delete-outline" color={colors.danger} onPress={() => confirmDelete('Delete room?', 'All beds in this room will be deleted.', () => buildingApi.deleteRoom(building._id, floor._id, item._id))} /><Icon name="chevron-right" size={21} color={colors.muted} />
+          <ScrollView contentContainerStyle={styles.sheetList}>{(floor?.rooms || []).length ? floor.rooms.map(item => { const totalBeds = item.beds?.length || Number(item.shareType) || 0; const occupied = item.beds?.filter(b => b.status === 'Occupied').length || 0; const free = Math.max(0, totalBeds - occupied); return <Pressable key={item._id} style={styles.listCard} onPress={() => { setRoom(item); setLevel('beds'); }}>
+            <View style={styles.listIcon}><Icon name="door" size={20} color={colors.primary} /></View><View style={styles.flex}><Text style={styles.listTitle}>Room {item.roomNumber}</Text><View style={styles.roomStats}><Text style={[styles.roomStat, styles.roomShare]}>{item.shareType}-Share</Text><Text style={[styles.roomStat, styles.roomFilled]}>{occupied} Filled</Text><Text style={[styles.roomStat, styles.roomFree]}>{free} Free</Text></View></View><IconAction icon="pencil-outline" color={colors.primary} onPress={() => openRoomForm(item)} /><IconAction icon="delete-outline" color={colors.danger} onPress={() => confirmDelete('Delete room?', 'All beds in this room will be deleted.', () => buildingApi.deleteRoom(building._id, floor._id, item._id))} /><Icon name="chevron-right" size={21} color={colors.muted} />
           </Pressable>; }) : <EmptyState title="No rooms available" message="Add a room to continue." icon="door-open" />}</ScrollView>
         </> : null}
 
         {level === 'beds' ? <>
-          <View style={styles.sheetAction}><AppButton title="Add Bed" icon="bed-outline" onPress={addBed} /></View>
+          <View style={styles.sheetAction}><AppButton title="Add Bed" icon="bed-outline" loading={bedSaving} onPress={addBed} /></View>
           <ScrollView contentContainerStyle={styles.bedGrid}>{(room?.beds || []).map(bed => { const occupied = bed.status === 'Occupied'; return <Pressable key={bed._id} style={[styles.bed, occupied ? styles.bedOccupied : styles.bedFree]} onPress={() => openBed(bed)}>
             <Icon name="bed" size={27} color={occupied ? colors.danger : colors.success} /><Text style={styles.bedTitle}>Bed {bed.bedNumber}</Text><Text style={[styles.bedStatus, { color: occupied ? colors.danger : colors.success }]}>{occupied ? 'Occupied' : 'Available'}</Text>{!occupied ? <Pressable style={styles.removeBed} onPress={() => removeBed(bed)}><Icon name="minus" size={16} color={colors.danger} /></Pressable> : <Text style={styles.tapInfo}>Tap for tenant</Text>}
           </Pressable>; })}</ScrollView>
@@ -358,8 +379,9 @@ export default function AddHostelScreen({ onLogout }) {
       </Sheet>
 
       <Sheet visible={!!tenant} title="Tenant Details" subtitle={tenant?.name} icon="account-outline" tall onClose={() => setTenant(null)}>
-        <ScrollView contentContainerStyle={styles.form}><View style={styles.tenantHero}><View style={styles.avatar}><Text style={styles.avatarText}>{tenant?.name?.[0]?.toUpperCase()}</Text></View><View><Text style={styles.tenantName}>{tenant?.name}</Text><Text style={styles.muted}>{tenant?.phone}</Text></View></View>
+        <ScrollView contentContainerStyle={styles.form}><View style={styles.tenantHero}><Pressable disabled={!tenant?.documents?.passportPhoto} onPress={() => setProfilePopup({ imageUrl: tenant.documents.passportPhoto, name: tenant.name })}>{tenant?.documents?.passportPhoto ? <Image source={{ uri: tenant.documents.passportPhoto }} style={styles.tenantPhoto} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{tenant?.name?.[0]?.toUpperCase()}</Text></View>}</Pressable><View><Text style={styles.tenantName}>{tenant?.name}</Text><Text style={styles.muted}>{tenant?.phone}</Text></View></View>
           {[['Email', tenant?.email], ["Father's Name", tenant?.fatherName], ['Joining Date', dateText(tenant?.joiningDate)], ['Monthly Rent', money(tenant?.rentAmount || 0)], ['Address', tenant?.permanentAddress]].filter(([, v]) => v).map(([label, value]) => <View style={styles.infoRow} key={label}><Text style={styles.infoLabel}>{label}</Text><Text style={styles.infoValue}>{value}</Text></View>)}
+          <AppButton title="View Full Tenant Details" icon="account-details-outline" variant="secondary" onPress={() => { const tenantId = tenant?._id || tenant?.id; setTenant(null); if (tenantId) navigation.navigate('TenantDetails', { tenantId }); }} />
           <View style={styles.contactRow}><AppButton title="Call" icon="phone" style={styles.contact} onPress={() => Linking.openURL(`tel:${tenant?.phone}`)} /><AppButton title="WhatsApp" icon="whatsapp" style={styles.contact} onPress={() => Linking.openURL(`https://wa.me/91${tenant?.phone?.replace(/\D/g, '')}`)} /></View>
         </ScrollView>
       </Sheet>
@@ -367,6 +389,7 @@ export default function AddHostelScreen({ onLogout }) {
       <Sheet visible={!!planInfo} title="Plan Limit Exceeded" subtitle="Bed limit reached for your current plan" icon="alert-circle-outline" onClose={() => setPlanInfo(null)}>
         <View style={styles.form}><View style={styles.limitBox}><Text style={styles.infoValue}>Plan bed limit: {planInfo?.bedLimit}</Text><Text style={styles.infoValue}>Beds used: {planInfo?.usedBeds}</Text><Text style={styles.infoValue}>Beds remaining: {planInfo?.remainingBeds}</Text></View><Text style={styles.limitText}>Please contact support to upgrade or extend your plan before adding more beds.</Text><AppButton title="Got it" icon="check" onPress={() => setPlanInfo(null)} /></View>
       </Sheet>
+      <ProfileImagePopup visible={!!profilePopup} imageUrl={profilePopup?.imageUrl} name={profilePopup?.name} onClose={() => setProfilePopup(null)} />
       <Pressable accessibilityLabel="New building" style={styles.fab} onPress={() => openBuildingForm(null)}><Icon name="plus" size={25} color="#fff" /></Pressable>
     </View>
   );
@@ -379,7 +402,8 @@ const styles = StyleSheet.create({
   propertyCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 12, marginBottom: 10, shadowColor: '#111827', shadowOpacity: .07, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 2 }, propertyTop: { flexDirection: 'row', alignItems: 'center', gap: 9 }, buildingIcon: { width: 36, height: 36, borderRadius: 16, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' }, buildingName: { fontSize: 16, fontWeight: '900', color: colors.text }, moreButton: { width: 34, height: 34, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.faint }, metadata: { color: colors.muted, fontSize: 11, fontWeight: '600', marginTop: 9 }, cardFoot: { marginTop: 7, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }, viewDetails: { color: colors.primary, fontSize: 12, fontWeight: '900' }, overflowMenu: { position: 'absolute', right: 12, top: 48, width: 128, backgroundColor: colors.surface, borderRadius: 16, paddingVertical: 5, shadowColor: '#111827', shadowOpacity: .16, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 8, zIndex: 10 }, menuItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 12 }, menuText: { fontSize: 12, color: colors.text, fontWeight: '800' }, deleteText: { color: colors.danger }, iconAction: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center' },
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.55)' }, sheet: { maxHeight: '82%', backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' }, tallSheet: { height: '88%' }, sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }, sheetIcon: { width: 38, height: 38, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }, sheetTitle: { color: colors.text, fontSize: 18, fontWeight: '900', textTransform: 'capitalize' }, sheetSub: { color: colors.muted, fontSize: 11, marginTop: 2 }, close: { width: 36, height: 36, borderRadius: 16, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center' }, sheetAction: { paddingHorizontal: 16, paddingTop: 12 }, sheetList: { padding: 16 },
   listCard: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, borderRadius: 16, marginBottom: 7, backgroundColor: colors.surface }, listIcon: { width: 36, height: 36, borderRadius: 16, backgroundColor: colors.faint, alignItems: 'center', justifyContent: 'center' }, listTitle: { color: colors.text, fontWeight: '900', fontSize: 14 },
+  roomStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 6 }, roomStat: { fontSize: 9.5, fontWeight: '900', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, overflow: 'hidden' }, roomShare: { color: colors.primary, backgroundColor: colors.primarySoft }, roomFilled: { color: colors.danger, backgroundColor: colors.dangerSoft }, roomFree: { color: colors.success, backgroundColor: colors.successSoft },
   bedGrid: { padding: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, bed: { width: '47%', borderRadius: 16, padding: 13, alignItems: 'center' }, bedFree: { backgroundColor: colors.successSoft }, bedOccupied: { backgroundColor: colors.dangerSoft }, bedTitle: { color: colors.text, fontWeight: '900', marginTop: 5 }, bedStatus: { fontSize: 11, fontWeight: '800', marginTop: 2 }, removeBed: { position: 'absolute', right: 6, top: 6, width: 25, height: 25, borderRadius: 12, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }, tapInfo: { fontSize: 9, color: colors.muted, marginTop: 5 },
-  form: { padding: 18, gap: 10 }, fieldLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }, shareRow: { flexDirection: 'row', gap: 7 }, share: { flex: 1, height: 44, borderWidth: 1, borderColor: colors.border, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }, shareActive: { backgroundColor: colors.primary, borderColor: colors.primary }, shareText: { color: colors.primary, fontWeight: '900', fontSize: 10 }, shareTextActive: { color: '#fff' }, tenantHero: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }, avatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }, avatarText: { color: '#fff', fontSize: 23, fontWeight: '900' }, tenantName: { color: colors.text, fontSize: 20, fontWeight: '900' }, infoRow: { padding: 12, borderRadius: 16, backgroundColor: colors.faint }, infoLabel: { fontSize: 10, color: colors.muted, fontWeight: '800', textTransform: 'uppercase' }, infoValue: { fontSize: 13, color: colors.text, fontWeight: '700', marginTop: 3 }, contactRow: { flexDirection: 'row', gap: 10 }, contact: { flex: 1 }, limitBox: { padding: 14, borderRadius: 16, backgroundColor: colors.dangerSoft, gap: 6 }, limitText: { color: colors.muted, lineHeight: 20, paddingVertical: 6 }, fab: { position: 'absolute', right: 20, bottom: 24, width: 58, height: 58, borderRadius: 29, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: colors.primary, shadowOpacity: .28, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
+  form: { padding: 18, gap: 10 }, fieldLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }, shareRow: { flexDirection: 'row', gap: 7 }, share: { flex: 1, height: 44, borderWidth: 1, borderColor: colors.border, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }, shareActive: { backgroundColor: colors.primary, borderColor: colors.primary }, shareText: { color: colors.primary, fontWeight: '900', fontSize: 10 }, shareTextActive: { color: '#fff' }, tenantHero: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }, tenantPhoto: { width: 58, height: 58, borderRadius: 29, borderWidth: 2, borderColor: colors.primarySoft }, avatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }, avatarText: { color: '#fff', fontSize: 23, fontWeight: '900' }, tenantName: { color: colors.text, fontSize: 20, fontWeight: '900' }, infoRow: { padding: 12, borderRadius: 16, backgroundColor: colors.faint }, infoLabel: { fontSize: 10, color: colors.muted, fontWeight: '800', textTransform: 'uppercase' }, infoValue: { fontSize: 13, color: colors.text, fontWeight: '700', marginTop: 3 }, contactRow: { flexDirection: 'row', gap: 10 }, contact: { flex: 1 }, limitBox: { padding: 14, borderRadius: 16, backgroundColor: colors.dangerSoft, gap: 6 }, limitText: { color: colors.muted, lineHeight: 20, paddingVertical: 6 }, fab: { position: 'absolute', right: 20, bottom: 24, width: 58, height: 58, borderRadius: 29, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: colors.primary, shadowOpacity: .28, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
   skeletonBlock: { backgroundColor: '#e4e8ef', borderRadius: 8 },
 });

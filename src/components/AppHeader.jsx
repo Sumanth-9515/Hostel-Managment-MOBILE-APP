@@ -9,7 +9,7 @@ import { useOnboardingNotifications } from './OnboardingNotifications';
 const appIcon = require('../../assets/app-logo-new.png');
 
 export default function AppHeader({ title, subtitle, onMenu, onBack, onLogout, rightIcon, onRightPress, showOnboardingNotifications }) {
-  const { unreadCount, open } = useOnboardingNotifications();
+  const { unreadCount } = useOnboardingNotifications();
   const navigation = useNavigation();
 
   return (
@@ -42,7 +42,7 @@ export default function AppHeader({ title, subtitle, onMenu, onBack, onLogout, r
             <Pressable onPress={() => navigation.navigate('OwnerSearch')} style={styles.iconBtn}>
               <Icon name="magnify" size={22} color={colors.primary} />
             </Pressable>
-            <Pressable onPress={open} style={styles.iconBtn}>
+            <Pressable onPress={() => navigation.navigate('Notifications')} style={styles.iconBtn}>
               <Icon name="bell-outline" size={21} color={colors.primary} />
               {unreadCount > 0 ? (
                 <View style={styles.badge}>

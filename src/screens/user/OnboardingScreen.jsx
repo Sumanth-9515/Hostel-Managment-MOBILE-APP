@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { Alert, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Linking, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import AppHeader from '../../components/AppHeader';
@@ -368,6 +368,7 @@ export default function OnboardingScreen({ navigation, onLogout }) {
   const { open } = useSidebar();
   const [dataLoading, setDataLoading] = useState(!onboardingCache.hasData);
   const [dataError, setDataError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [linkLoading, setLinkLoading] = useState(false);
   const [link, setLink] = useState(onboardingCache.link);
   const [showQr, setShowQr] = useState(false);
@@ -421,6 +422,7 @@ export default function OnboardingScreen({ navigation, onLogout }) {
     } finally {
       if (requestId === loadRequestRef.current) {
         setDataLoading(false);
+        setRefreshing(false);
       }
     }
   }, []);
@@ -440,6 +442,14 @@ export default function OnboardingScreen({ navigation, onLogout }) {
       loadLink();
     }
   }, [load, loadLink]));
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load();
+    if (!onboardingCache.link) {
+      loadLink();
+    }
+  }, [load, loadLink]);
 
   const filtered = useMemo(() => tenants.filter(item => {
     const query = search.trim().toLowerCase();
@@ -466,7 +476,10 @@ export default function OnboardingScreen({ navigation, onLogout }) {
   return (
     <View style={styles.screen}>
       <AppHeader title="Onboarding Manager" subtitle="Self-registration and candidate tracking" onMenu={open} onLogout={onLogout} showOnboardingNotifications />
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
         {showSkeleton ? (
           <OnboardingDataSkeleton />

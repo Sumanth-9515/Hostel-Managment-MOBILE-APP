@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Animated, BackHandler, Dimensions, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, BackHandler, Dimensions, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { colors } from '../utils/constants';
 import { navRef } from '../navigation/navRef';
+import { useAppUpdates } from '../updates/AppUpdateProvider';
 
 const SidebarContext = createContext({ open: () => {}, close: () => {} });
 export const useSidebar = () => useContext(SidebarContext);
@@ -12,6 +13,7 @@ const WIDTH = Math.min(304, Dimensions.get('window').width * 0.84);
 const appIcon = require('../../assets/app-logo-new.png');
 
 const ITEMS = [
+  { label: 'Payment Requests', route: 'PaymentRequests', icon: 'credit-card-check', tint: colors.primary },
   { label: 'Total Candidates', route: 'Candidates', icon: 'account-group', tint: colors.info },
   { label: 'Buildings Overview', route: 'Overview', icon: 'eye', tint: colors.violet },
   { label: 'Activity Logs', route: 'ActivityLogs', icon: 'history', tint: colors.accent },
@@ -26,6 +28,7 @@ const SUPPORT_CONTACTS = [
 const SUPPORT_MESSAGE = 'Hello Nilayam support, I need help with the app.';
 
 export function SidebarProvider({ children, user, onLogout }) {
+  const { checking: checkingForUpdates, checkForUpdates } = useAppUpdates();
   const [visible, setVisible] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const slide = useRef(new Animated.Value(-WIDTH)).current;
@@ -78,6 +81,11 @@ export function SidebarProvider({ children, user, onLogout }) {
     setTimeout(() => setHelpOpen(true), 280);
   };
 
+  const handleCheckForUpdates = () => {
+    close();
+    setTimeout(() => checkForUpdates({ manual: true }), 280);
+  };
+
   const callSupport = phone => {
     Linking.openURL(`tel:${phone}`).catch(() => {});
   };
@@ -123,6 +131,24 @@ export function SidebarProvider({ children, user, onLogout }) {
                     <Icon name="chevron-right" size={18} color={colors.border} />
                   </Pressable>
                 ))}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Check for app updates"
+                  style={styles.item}
+                  disabled={checkingForUpdates}
+                  onPress={handleCheckForUpdates}
+                  android_ripple={{ color: colors.primarySoft }}
+                >
+                  <View style={[styles.itemIcon, { backgroundColor: colors.infoSoft }]}>
+                    {checkingForUpdates ? (
+                      <ActivityIndicator size="small" color={colors.info} />
+                    ) : (
+                      <Icon name="cellphone-arrow-down" size={20} color={colors.info} />
+                    )}
+                  </View>
+                  <Text style={styles.itemText}>{checkingForUpdates ? 'Checking for Updates...' : 'Check for Updates'}</Text>
+                  <Icon name="chevron-right" size={18} color={colors.border} />
+                </Pressable>
               </View>
 
               <View style={styles.flex} />

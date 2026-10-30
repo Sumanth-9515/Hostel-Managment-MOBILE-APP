@@ -9,6 +9,7 @@ import ProfileImagePopup from '../../components/ProfileImagePopup';
 import { rentApi } from '../../api/rentApi';
 import { colors } from '../../utils/constants';
 import { getMessage, money } from '../../utils/helpers';
+import { payableRemainingFor, rentDisplayStatus, revenueSummaryWithDefaults, upcomingAmountFor } from '../../utils/rentCompatibility';
 
 const pct = (num, den) => (den > 0 ? Math.round((num / den) * 100) : 0);
 
@@ -33,7 +34,7 @@ const locationLabel = item => {
   return [building, floor, room ? `Room ${room}` : '', bed ? `Bed ${bed}` : ''].filter(Boolean).join(' / ') || 'Location not assigned';
 };
 
-const remainingOf = item => Number(item?.remaining ?? ((item?.record?.rentAmount || 0) - (item?.record?.paidAmount || 0)));
+const remainingOf = item => rentDisplayStatus(item) === 'Upcoming' ? upcomingAmountFor(item) : payableRemainingFor(item);
 
 const tenantIdOf = item => String(item?.tenant?._id || item?.tenantId || '');
 
@@ -66,7 +67,7 @@ const mergeTenantPhotos = (summary, rentAll = []) => {
 
 const buildRentMessage = (item, selectedMonth) => {
   const tenant = item?.tenant || {};
-  const status = item?.record?.status || 'Due';
+  const status = rentDisplayStatus(item);
   const message = `Hello ${tenant.name || 'there'}, your rent status for ${monthLabel(selectedMonth)} is ${status}. Pending amount: ${money(remainingOf(item))}. Location: ${locationLabel(item)}.`;
   return encodeURIComponent(message);
 };
@@ -74,6 +75,7 @@ const buildRentMessage = (item, selectedMonth) => {
 const statusConfig = {
   Partial: { icon: 'progress-clock', color: colors.warning, bg: colors.accentSoft, empty: 'No partial payments for this month.' },
   Due: { icon: 'alert-circle-outline', color: colors.danger, bg: colors.dangerSoft, empty: 'No full dues for this month.' },
+  Upcoming: { icon: 'calendar-clock-outline', color: colors.info, bg: colors.infoSoft, empty: 'No upcoming rent for this month.' },
 };
 
 function SummaryBox({ label, value, color, bg }) {
@@ -87,7 +89,7 @@ function SummaryBox({ label, value, color, bg }) {
 
 function CandidateRow({ item, monthYear, onPhotoPress, onOpenDetails }) {
   const tenant = item?.tenant || {};
-  const status = item?.record?.status || 'Due';
+  const status = rentDisplayStatus(item);
   const config = statusConfig[status] || statusConfig.Due;
   const phone = tenant.phone?.replace(/\D/g, '');
   const photo = tenant.documents?.passportPhoto;
@@ -207,15 +209,17 @@ export default function RevenueOverviewScreen({ navigation, route }) {
     load();
   }, [load]));
 
-  const summary = data?.summary || {};
+  const summary = revenueSummaryWithDefaults(data?.summary);
   const grouped = useMemo(() => ({
-    Due: (Array.isArray(data?.tenants) ? data.tenants : []).filter(item => (item?.record?.status || 'Due') === 'Due'),
-    Partial: (Array.isArray(data?.tenants) ? data.tenants : []).filter(item => (item?.record?.status || 'Due') === 'Partial'),
+    Due: (Array.isArray(data?.tenants) ? data.tenants : []).filter(item => rentDisplayStatus(item) === 'Due'),
+    Partial: (Array.isArray(data?.tenants) ? data.tenants : []).filter(item => rentDisplayStatus(item) === 'Partial'),
+    Upcoming: (Array.isArray(data?.tenants) ? data.tenants : []).filter(item => rentDisplayStatus(item) === 'Upcoming'),
   }), [data?.tenants]);
 
   const total = Number(summary.totalRevenue || 0);
   const collected = Number(summary.collectedRevenue || 0);
   const pending = Number(summary.pendingRevenue || 0);
+  const upcoming = summary.upcomingRevenue;
 
   return (
     <View style={styles.screen}>
@@ -247,10 +251,11 @@ export default function RevenueOverviewScreen({ navigation, route }) {
                 <SummaryBox label="Total" value={money(total)} color={colors.text} bg={colors.faint} />
                 <SummaryBox label="Collected" value={money(collected)} color={colors.success} bg={colors.successSoft} />
                 <SummaryBox label="Pending" value={money(pending)} color={colors.danger} bg={colors.dangerSoft} />
+                <SummaryBox label="Upcoming" value={money(upcoming)} color={colors.info} bg={colors.infoSoft} />
               </View>
             </AppCard>
 
-            {['Due', 'Partial'].map(status => (
+            {['Due', 'Partial', 'Upcoming'].map(status => (
               <StatusSection
                 key={status}
                 status={status}

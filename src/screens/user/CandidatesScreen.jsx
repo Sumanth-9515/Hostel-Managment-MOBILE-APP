@@ -16,6 +16,7 @@ import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { registerCacheReset } from '../../utils/cacheRegistry';
 import { compactLocation, dateText, getMessage, money } from '../../utils/helpers';
+import { accumulatedDueFor, currentDueFor, isUpcomingRent, rentDisplayStatus, upcomingAmountFor } from '../../utils/rentCompatibility';
 
 const candidatesCache = {
   hasData: false,
@@ -30,6 +31,25 @@ registerCacheReset(() => {
   candidatesCache.rentMap = new Map();
   candidatesCache.buildings = [];
 });
+
+const monthStart = value => {
+  if (!value) return null;
+  const text = String(value);
+  const monthMatch = text.match(/^(\d{4})[-/](\d{1,2})/);
+  const date = monthMatch ? new Date(Number(monthMatch[1]), Number(monthMatch[2]) - 1, 1) : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+};
+
+const historyAfterJoining = (history, joiningDate) => {
+  const joiningMonth = monthStart(joiningDate);
+  const records = Array.isArray(history) ? history : [];
+  if (!joiningMonth) return records;
+  return records.filter(record => {
+    const recordMonth = monthStart(record?.dueDate || record?.monthYear);
+    return !recordMonth || recordMonth >= joiningMonth;
+  });
+};
 
 // ---------- Small building blocks ----------
 
@@ -70,7 +90,9 @@ function DetailInfo({ label, value, accent }) {
 
 function CandidateRow({ tenant, rent, onPress }) {
   const overdue = rent?.hasPreviousPending;
-  const due = Number(rent?.totalAccumulatedDue || 0);
+  const due = accumulatedDueFor(rent);
+  const isUpcoming = isUpcomingRent(rent);
+  const upcomingAmount = upcomingAmountFor(rent);
   const advance = Number(tenant.advanceAmount || 0);
   const paidAdvance = Number(tenant.paidAdvanceAmount ?? tenant.paidadvanceAmount ?? 0);
   const inactive = tenant.status === 'Inactive';
@@ -111,6 +133,12 @@ function CandidateRow({ tenant, rent, onPress }) {
             <Text style={styles.financeLabel}>Advance</Text>
             <Text style={styles.financeValue}>{money(Math.max(0, advance - paidAdvance))}</Text>
           </View>
+          {isUpcoming ? (
+            <View style={styles.financeItem}>
+              <Text style={styles.financeLabel}>Upcoming</Text>
+              <Text style={[styles.financeValue, styles.financeUpcoming]}>{money(upcomingAmount)}</Text>
+            </View>
+          ) : null}
         </View>
 
         {overdue ? (
@@ -121,6 +149,7 @@ function CandidateRow({ tenant, rent, onPress }) {
             </Text>
           </View>
         ) : null}
+        {isUpcoming ? <Text style={styles.upcomingBadge}>Upcoming</Text> : null}
       </View>
 
       <Icon name="chevron-right" size={18} color={colors.muted} />
@@ -296,7 +325,7 @@ export default function CandidatesScreen({ navigation, route }) {
     return {
       active: tenants.filter(t => t.status === 'Active').length,
       inactive: tenants.filter(t => t.status === 'Inactive').length,
-      dues: rents.filter(r => !r.hasPreviousPending && r.currentRecord?.status !== 'Paid').length,
+      dues: rents.filter(r => !r.hasPreviousPending && !isUpcomingRent(r) && r.currentRecord?.status !== 'Paid').length,
       overdue: rents.filter(r => r.hasPreviousPending).length,
     };
   }, [tenants, rentMap]);
@@ -305,9 +334,10 @@ export default function CandidatesScreen({ navigation, route }) {
   const rank = tenant => {
     const rent = rentMap.get(String(tenant._id));
     if (rent?.hasPreviousPending) return 0;
+    if (isUpcomingRent(rent)) return 3;
     if (rent?.currentRecord?.status === 'Due') return 1;
     if (rent?.currentRecord?.status === 'Partial') return 2;
-    return 3;
+    return 4;
   };
   const activeList = [...source.filter(t => t.status === 'Active')].sort((a, b) => rank(a) - rank(b));
   const inactiveList = source.filter(t => t.status === 'Inactive');
@@ -369,6 +399,9 @@ export default function CandidatesScreen({ navigation, route }) {
 
   const t = detail?.tenant;
   const current = detail?.currentRecord;
+  const currentDue = currentDueFor(detail);
+  const upcomingAmount = upcomingAmountFor(detail);
+  const visibleHistory = useMemo(() => historyAfterJoining(detail?.history, t?.joiningDate), [detail?.history, t?.joiningDate]);
 
   return (
     <View style={styles.screen}>
@@ -570,14 +603,18 @@ export default function CandidatesScreen({ navigation, route }) {
                         <Text style={styles.arrearsAmount}>{money(detail.arrearsTotal || 0)}</Text>
                       </View>
                     ) : null}
+                    {isUpcomingRent(detail) ? <Text style={styles.upcomingBadge}>Upcoming</Text> : null}
 
                     <View style={styles.detailGrid}>
                       <DetailInfo label="Phone" value={t.phone} />
                       <DetailInfo label="Joining" value={dateText(t.joiningDate)} />
                       <DetailInfo label="Monthly rent" value={money(t.rentAmount || 0)} accent />
+                      <DetailInfo label="Arrears" value={money(detail.arrearsTotal || 0)} />
+                      <DetailInfo label="Currently due" value={money(currentDue)} />
                       <DetailInfo label="Advance pending" value={money(detail.pendingAdvanceAmount ?? detail.advancePending ?? 0)} />
-                      <DetailInfo label="Current status" value={current?.status || 'No record'} />
-                      <DetailInfo label="Total due" value={money(detail.totalAccumulatedDue || 0)} accent />
+                      <DetailInfo label="Upcoming rent" value={money(upcomingAmount)} />
+                      <DetailInfo label="Current status" value={current ? rentDisplayStatus(detail) : 'No record'} />
+                      <DetailInfo label="Total accumulated due" value={money(accumulatedDueFor(detail))} accent />
                     </View>
                     <DetailInfo label="Allocation" value={compactLocation(t)} />
                     <DetailInfo label="Permanent address" value={t.permanentAddress} />
@@ -594,7 +631,7 @@ export default function CandidatesScreen({ navigation, route }) {
                     </View>
 
                     <Text style={styles.formSection}>Payment history</Text>
-                    {(detail.history || []).length ? (detail.history || []).map((record, index) => (
+                    {visibleHistory.length ? visibleHistory.map((record, index) => (
                       <View style={styles.history} key={`${record.monthYear}-${index}`}>
                         <View>
                           <Text style={styles.historyMonth}>
@@ -663,13 +700,15 @@ const styles = StyleSheet.create({
   statusTextInactive: { color: colors.danger },
   meta: { fontSize: 10.5, color: colors.muted, marginTop: 2 },
   location: { fontSize: 10.5, color: colors.primary, fontWeight: '700', marginTop: 2 },
-  financeStrip: { flexDirection: 'row', gap: 16, marginTop: 7 },
+  financeStrip: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginTop: 7 },
   financeItem: {},
   financeLabel: { fontSize: 9, color: colors.muted, fontWeight: '700', textTransform: 'uppercase' },
   financeValue: { fontSize: 11.5, color: colors.text, fontWeight: '800', marginTop: 1 },
   financeDanger: { color: colors.danger },
+  financeUpcoming: { color: colors.info },
   overdueRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
   overdueText: { fontSize: 10, color: colors.danger, fontWeight: '700' },
+  upcomingBadge: { alignSelf: 'flex-start', color: colors.info, backgroundColor: colors.infoSoft, fontSize: 10.5, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, overflow: 'hidden', marginTop: 6 },
 
   // Detail sheet
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,.55)' },

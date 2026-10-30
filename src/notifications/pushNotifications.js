@@ -69,14 +69,37 @@ async function getAndSaveToken(messagingInstance, user) {
   return token;
 }
 
-// Route a tapped onboarding notification to the Onboarding tab.
+// Route a tapped owner notification to the correct screen.
 function handleNotificationOpen(remoteMessage) {
   const type = String(remoteMessage?.data?.type || '').toLowerCase();
   const title = String(remoteMessage?.notification?.title || remoteMessage?.data?.title || '').toLowerCase();
   const body = String(remoteMessage?.notification?.body || remoteMessage?.data?.body || remoteMessage?.data?.message || '').toLowerCase();
+
+  if (type === 'payment-request' || title.includes('payment request') || body.includes('payment request')) {
+    navigate('PaymentRequests', { paymentRequestId: remoteMessage?.data?.paymentRequestId });
+    return;
+  }
+
   if (!type || type.includes('onboarding') || title.includes('onboarding') || body.includes('onboarding')) {
     navigate('UserTabs', { screen: 'Onboarding' });
   }
+}
+
+function getForegroundCopy(remoteMessage) {
+  const data = remoteMessage?.data || {};
+  const type = String(data.type || '').toLowerCase();
+
+  if (type === 'payment-request') {
+    return {
+      title: remoteMessage?.notification?.title || data.title || 'Payment Request',
+      body: remoteMessage?.notification?.body || data.body || data.message || 'A tenant submitted a payment request.',
+    };
+  }
+
+  return {
+    title: remoteMessage?.notification?.title || data.title || 'New onboarding submission',
+    body: remoteMessage?.notification?.body || data.body || data.message || 'A tenant submitted the onboarding form.',
+  };
 }
 
 // Foreground + tap listeners. Android/iOS show the tray notification by
@@ -90,9 +113,7 @@ function attachListeners(messagingInstance) {
   // a lightweight in-app heads-up (WhatsApp-style banner is also handled by
   // OnboardingNotificationsProvider; this gives an instant alert too).
   unsubscribeForeground = messagingInstance.onMessage(async remoteMessage => {
-    const data = remoteMessage?.data || {};
-    const title = remoteMessage?.notification?.title || data.title || 'New onboarding submission';
-    const body = remoteMessage?.notification?.body || data.body || data.message || 'A tenant submitted the onboarding form.';
+    const { title, body } = getForegroundCopy(remoteMessage);
     Alert.alert(title, body, [
       { text: 'Dismiss', style: 'cancel' },
       { text: 'View', onPress: () => handleNotificationOpen(remoteMessage) },

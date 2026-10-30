@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -13,12 +13,13 @@ import { useRefreshOnReconnect } from '../../network/connectivity';
 import { colors } from '../../utils/constants';
 import { registerCacheReset } from '../../utils/cacheRegistry';
 import { getMessage, money } from '../../utils/helpers';
+import { revenueSummaryWithDefaults } from '../../utils/rentCompatibility';
 
 const pct = (num, den) => (den > 0 ? Math.round((num / den) * 100) : 0);
 
 const currentMonthValue = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const istNow = new Date(Date.now() + (330 * 60 * 1000));
+  return `${istNow.getUTCFullYear()}-${String(istNow.getUTCMonth() + 1).padStart(2, '0')}`;
 };
 
 const monthLabel = (monthYear = currentMonthValue()) => {
@@ -26,13 +27,28 @@ const monthLabel = (monthYear = currentMonthValue()) => {
   return new Date(year, month - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 };
 
-const monthOptions = (count = 12) => {
-  const now = new Date();
-  return Array.from({ length: count }, (_, index) => {
-    const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
-    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    return { value, label: monthLabel(value) };
+const recordMonth = record => {
+  const monthYear = String(record?.monthYear || '');
+  if (/^\d{4}-\d{2}$/.test(monthYear)) return monthYear;
+  if (!record?.dueDate) return null;
+  const date = new Date(record.dueDate);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const revenueMonthsFromRent = rentItems => {
+  const months = new Set();
+  (Array.isArray(rentItems) ? rentItems : []).forEach(item => {
+    [item?.record, item?.currentRecord, ...(item?.pendingMonths || []), ...(item?.history || [])]
+      .forEach(record => {
+        const value = recordMonth(record);
+        if (value) months.add(value);
+      });
   });
+  const currentMonth = currentMonthValue();
+  return [...months]
+    .filter(value => value <= currentMonth)
+    .sort((a, b) => b.localeCompare(a));
 };
 
 const dashboardCache = {
@@ -41,6 +57,7 @@ const dashboardCache = {
   overview: [],
   selectedMonth: currentMonthValue(),
   monthlyRevenue: null,
+  revenueMonths: [],
 };
 
 registerCacheReset(() => {
@@ -49,6 +66,7 @@ registerCacheReset(() => {
   dashboardCache.overview = [];
   dashboardCache.selectedMonth = currentMonthValue();
   dashboardCache.monthlyRevenue = null;
+  dashboardCache.revenueMonths = [];
 });
 
 function Bar({ value, total, color = colors.primary }) {
@@ -131,20 +149,27 @@ function DashboardDataSkeleton() {
 
 export default function DashboardScreen({ navigation, onLogout, user }) {
   const { open } = useSidebar();
+  const cachedMonthIsVisible = dashboardCache.selectedMonth <= currentMonthValue();
   const [dataLoading, setDataLoading] = useState(!dashboardCache.hasData);
   const [dataError, setDataError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [profile, setProfile] = useState(dashboardCache.profile || user);
   const [overview, setOverview] = useState(dashboardCache.overview);
-  const [selectedMonth, setSelectedMonth] = useState(dashboardCache.selectedMonth);
-  const [monthlyRevenue, setMonthlyRevenue] = useState(dashboardCache.monthlyRevenue);
-  const [monthlyRevenueLoading, setMonthlyRevenueLoading] = useState(!dashboardCache.monthlyRevenue);
+  const [selectedMonth, setSelectedMonth] = useState(
+    cachedMonthIsVisible ? dashboardCache.selectedMonth : currentMonthValue(),
+  );
+  const [monthlyRevenue, setMonthlyRevenue] = useState(cachedMonthIsVisible ? dashboardCache.monthlyRevenue : null);
+  const [monthlyRevenueLoading, setMonthlyRevenueLoading] = useState(!cachedMonthIsVisible || !dashboardCache.monthlyRevenue);
+  const [revenueMonths, setRevenueMonths] = useState(dashboardCache.revenueMonths);
 
   const hasLoadedRef = useRef(dashboardCache.hasData);
   const loadRequestRef = useRef(0);
   const revenueRequestRef = useRef(0);
+  const revenueMonthsRequestRef = useRef(0);
   const helloWave = useRef(new Animated.Value(0)).current;
-  const revenueMonthOptions = useMemo(() => monthOptions(), []);
+  const revenueMonthOptions = revenueMonths
+    .filter(value => value <= currentMonthValue())
+    .map(value => ({ value, label: monthLabel(value) }));
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -211,10 +236,30 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
     }
   }, []);
 
+  const loadRevenueMonths = useCallback(async () => {
+    const requestId = ++revenueMonthsRequestRef.current;
+    try {
+      const rentItems = await rentApi.all();
+      if (requestId !== revenueMonthsRequestRef.current) return;
+      const months = revenueMonthsFromRent(rentItems);
+      setRevenueMonths(months);
+      dashboardCache.revenueMonths = months;
+      if (months.length) {
+        setSelectedMonth(current => {
+          if (months.includes(current)) return current;
+          dashboardCache.selectedMonth = months[0];
+          dashboardCache.monthlyRevenue = null;
+          return months[0];
+        });
+      }
+    } catch {}
+  }, []);
+
   useFocusEffect(useCallback(() => {
     load({ background: hasLoadedRef.current || dashboardCache.hasData })
       .then(() => { hasLoadedRef.current = true; });
-  }, [load]));
+    loadRevenueMonths();
+  }, [load, loadRevenueMonths]));
 
   useEffect(() => {
     loadMonthlyRevenue(selectedMonth);
@@ -223,7 +268,8 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
   useRefreshOnReconnect(useCallback(() => {
     load({ background: dashboardCache.hasData });
     loadMonthlyRevenue(selectedMonth);
-  }, [load, loadMonthlyRevenue, selectedMonth]));
+    loadRevenueMonths();
+  }, [load, loadMonthlyRevenue, loadRevenueMonths, selectedMonth]));
 
   const selectMonth = monthYear => {
     setSelectedMonth(monthYear);
@@ -240,7 +286,7 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
   const totalRooms = overview.reduce((s, b) => s + (b.totalRooms || 0), 0);
   const totalTenants = overview.reduce((s, b) => s + (b.totalTenants || 0), 0);
 
-  const revenueSummary = monthlyRevenue?.summary || {};
+  const revenueSummary = revenueSummaryWithDefaults(monthlyRevenue?.summary);
   const totalRevenue = revenueSummary.totalRevenue || 0;
   const collected = revenueSummary.collectedRevenue || 0;
   const pending = revenueSummary.pendingRevenue || 0;
@@ -265,7 +311,7 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
       <ScrollView
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); loadMonthlyRevenue(selectedMonth); }} />}>
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); loadMonthlyRevenue(selectedMonth); loadRevenueMonths(); }} />}>
 
         <View style={styles.greetingRow}>
           <Text style={styles.hello}>{greet},{ownerName}..</Text>
@@ -371,19 +417,6 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
           </>
         )}
 
-        {/* Quick actions */}
-        <AppCard>
-          <Text style={styles.cardTitle}>Quick Actions</Text>
-          <View style={styles.actionGrid}>
-            <Action icon="account-plus" label="Add Tenant" color={colors.primary} onPress={() => navigation.navigate('AddCandidate')} />
-            <Action icon="office-building" label="My Hostels" color={colors.info} onPress={() => navigation.navigate('Hostels')} />
-            <Action icon="receipt" label="Rent" color={colors.accent} onPress={() => navigation.navigate('Rent')} />
-            <Action icon="clipboard-account" label="Onboard" color={colors.violet} onPress={() => navigation.navigate('Onboarding')} />
-            <Action icon="account-group" label="Candidates" color={colors.success} onPress={() => navigation.navigate('Candidates')} />
-            <Action icon="history" label="Activity" color={colors.warning} onPress={() => navigation.navigate('ActivityLogs')} />
-          </View>
-        </AppCard>
-
         {/* Properties */}
         {hasData ? (
           <>
@@ -420,6 +453,19 @@ export default function DashboardScreen({ navigation, onLogout, user }) {
             })}
           </>
         ) : null}
+
+        {/* Quick actions */}
+        <AppCard>
+          <Text style={styles.cardTitle}>Quick Actions</Text>
+          <View style={styles.actionGrid}>
+            <Action icon="account-plus" label="Add Tenant" color={colors.primary} onPress={() => navigation.navigate('AddCandidate')} />
+            <Action icon="office-building" label="My Hostels" color={colors.info} onPress={() => navigation.navigate('Hostels')} />
+            <Action icon="receipt" label="Rent" color={colors.accent} onPress={() => navigation.navigate('Rent')} />
+            <Action icon="clipboard-account" label="Onboard" color={colors.violet} onPress={() => navigation.navigate('Onboarding')} />
+            <Action icon="account-group" label="Candidates" color={colors.success} onPress={() => navigation.navigate('Candidates')} />
+            <Action icon="history" label="Activity" color={colors.warning} onPress={() => navigation.navigate('ActivityLogs')} />
+          </View>
+        </AppCard>
         <View style={styles.footerSpacer} />
       </ScrollView>
     </View>

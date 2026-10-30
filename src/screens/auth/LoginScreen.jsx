@@ -37,6 +37,18 @@ export default function LoginScreen({ navigation, onAuth }) {
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotStep, setForgotStep] = useState('email');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotOtp, setForgotOtp] = useState('');
+  const [forgotPassword, setForgotPassword] = useState('');
+  const [forgotConfirm, setForgotConfirm] = useState('');
+  const [forgotToken, setForgotToken] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+  const [forgotInfo, setForgotInfo] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [showForgotConfirm, setShowForgotConfirm] = useState(false);
 
   useEffect(() => {
     masterApi.plans().then(setPlans).catch(() => { });
@@ -76,6 +88,115 @@ export default function LoginScreen({ navigation, onAuth }) {
     setHelpOpen(false);
     Linking.openURL(`https://wa.me/91${HELP_PHONE}?text=${encodeURIComponent(HELP_MESSAGE)}`).catch(() => Alert.alert('WhatsApp', 'Unable to open WhatsApp.'));
   };
+
+  const openForgot = () => {
+    setForgotOpen(true);
+    setForgotStep('email');
+    setForgotEmail(email.trim().toLowerCase());
+    setForgotOtp('');
+    setForgotPassword('');
+    setForgotConfirm('');
+    setForgotToken('');
+    setForgotError('');
+    setForgotInfo('');
+    setShowForgotPassword(false);
+    setShowForgotConfirm(false);
+  };
+
+  const closeForgot = () => {
+    if (forgotLoading) return;
+    setForgotOpen(false);
+    setForgotError('');
+    setForgotInfo('');
+  };
+
+  const sendForgotOtp = async () => {
+    const cleanEmail = forgotEmail.trim().toLowerCase();
+    if (!cleanEmail) {
+      setForgotError('Please enter your registered email.');
+      return;
+    }
+    setForgotLoading(true);
+    setForgotError('');
+    setForgotInfo('');
+    try {
+      await authApi.sendForgotOtp({ email: cleanEmail });
+      setForgotEmail(cleanEmail);
+      setForgotStep('otp');
+      setForgotInfo('OTP sent to your registered email.');
+    } catch (error) {
+      setForgotError(getMessage(error) || 'Unable to send OTP.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const verifyForgotOtp = async () => {
+    const cleanOtp = forgotOtp.trim();
+    if (!cleanOtp) {
+      setForgotError('Please enter the OTP.');
+      return;
+    }
+    setForgotLoading(true);
+    setForgotError('');
+    setForgotInfo('');
+    try {
+      const data = await authApi.verifyForgotOtp({ email: forgotEmail, otp: cleanOtp });
+      setForgotToken(data.resetToken || '');
+      setForgotStep('password');
+      setForgotInfo('Email verified. Set your new password.');
+    } catch (error) {
+      setForgotError(getMessage(error) || 'OTP verification failed.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const updateForgotPassword = async () => {
+    if (forgotPassword.length < 6) {
+      setForgotError('Password must be at least 6 characters.');
+      return;
+    }
+    if (forgotPassword !== forgotConfirm) {
+      setForgotError('Passwords do not match.');
+      return;
+    }
+    setForgotLoading(true);
+    setForgotError('');
+    setForgotInfo('');
+    try {
+      await authApi.updateForgotPassword({
+        email: forgotEmail,
+        resetToken: forgotToken,
+        password: forgotPassword,
+      });
+      setForgotOpen(false);
+      setPassword('');
+      Alert.alert('Password updated', 'Your password has been updated successfully.');
+    } catch (error) {
+      setForgotError(getMessage(error) || 'Password update failed.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const forgotAction = forgotStep === 'email'
+    ? sendForgotOtp
+    : forgotStep === 'otp'
+      ? verifyForgotOtp
+      : updateForgotPassword;
+
+  const forgotActionText = forgotLoading
+    ? forgotStep === 'email'
+      ? 'Sending OTP...'
+      : forgotStep === 'otp'
+        ? 'Verifying...'
+        : 'Updating...'
+    : forgotStep === 'email'
+      ? 'Send OTP'
+      : forgotStep === 'otp'
+        ? 'Verify OTP'
+        : 'Update Password';
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -122,7 +243,7 @@ export default function LoginScreen({ navigation, onAuth }) {
             </Pressable>
           </View>
 
-          <Pressable style={styles.forgot} onPress={() => setHelpOpen(true)}>
+          <Pressable style={styles.forgot} onPress={openForgot}>
             <Text style={styles.forgotText}>Forgot Password?</Text>
           </Pressable>
 
@@ -164,6 +285,139 @@ export default function LoginScreen({ navigation, onAuth }) {
           </Pressable>
         </ScrollView>
       </KeyboardAvoid>
+
+      {/* Forgot password popup */}
+      <Modal visible={forgotOpen} transparent animationType="fade" onRequestClose={closeForgot}>
+        <Pressable style={styles.forgotBackdrop} onPress={closeForgot}>
+          <Pressable style={styles.forgotCard} onPress={() => { }}>
+            <View style={styles.forgotHeader}>
+              <View style={styles.forgotHeaderLeft}>
+                <View style={styles.forgotIcon}>
+                  <Icon name="shield-key-outline" size={27} color="#fff" />
+                </View>
+                <View style={styles.forgotTitleWrap}>
+                  <Text style={styles.forgotTitle}>Reset Password</Text>
+                  <Text style={styles.forgotSub}>
+                    {forgotStep === 'email' && 'Enter your registered email to receive an OTP.'}
+                    {forgotStep === 'otp' && `We sent a verification code to ${forgotEmail}.`}
+                    {forgotStep === 'password' && 'Create a new password for your account.'}
+                  </Text>
+                </View>
+              </View>
+              <Pressable style={styles.forgotClose} onPress={closeForgot} disabled={forgotLoading}>
+                <Icon name="close" size={20} color="#8a98a5" />
+              </Pressable>
+            </View>
+
+            <View style={styles.forgotBody}>
+              <View style={styles.forgotSteps}>
+                <View style={[styles.forgotStepBar, styles.forgotStepOn]} />
+                <View style={[styles.forgotStepBar, (forgotStep === 'otp' || forgotStep === 'password') && styles.forgotStepOn]} />
+                <View style={[styles.forgotStepBar, forgotStep === 'password' && styles.forgotStepOn]} />
+              </View>
+
+              {forgotStep === 'email' ? (
+                <>
+                  <Text style={styles.forgotInputLabel}>Registered Email</Text>
+                  <View style={[styles.forgotInputWrap, forgotError && styles.forgotInputError]}>
+                    <Icon name="email-outline" size={20} color={theme.icon} />
+                    <TextInput
+                      value={forgotEmail}
+                      onChangeText={text => { setForgotEmail(text); setForgotError(''); }}
+                      placeholder="you@example.com"
+                      placeholderTextColor="#a7b3ba"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      style={styles.forgotInput}
+                    />
+                  </View>
+                </>
+              ) : null}
+
+              {forgotStep === 'otp' ? (
+                <>
+                  <Text style={styles.forgotInputLabel}>Enter OTP</Text>
+                  <View style={[styles.forgotInputWrap, forgotError && styles.forgotInputError]}>
+                    <Icon name="numeric" size={20} color={theme.icon} />
+                    <TextInput
+                      value={forgotOtp}
+                      onChangeText={text => { setForgotOtp(text.replace(/\D/g, '')); setForgotError(''); }}
+                      placeholder="5-digit OTP"
+                      placeholderTextColor="#a7b3ba"
+                      keyboardType="number-pad"
+                      maxLength={5}
+                      autoCorrect={false}
+                      style={styles.forgotInput}
+                    />
+                  </View>
+                </>
+              ) : null}
+
+              {forgotStep === 'password' ? (
+                <>
+                  <Text style={styles.forgotInputLabel}>New Password</Text>
+                  <View style={[styles.forgotInputWrap, forgotError && styles.forgotInputError]}>
+                    <Icon name="lock-outline" size={20} color={theme.icon} />
+                    <TextInput
+                      value={forgotPassword}
+                      onChangeText={text => { setForgotPassword(text); setForgotError(''); }}
+                      placeholder="Minimum 6 characters"
+                      placeholderTextColor="#a7b3ba"
+                      secureTextEntry={!showForgotPassword}
+                      autoCapitalize="none"
+                      style={styles.forgotInput}
+                    />
+                    <Pressable onPress={() => setShowForgotPassword(v => !v)} hitSlop={8}>
+                      <Icon name={showForgotPassword ? 'eye-outline' : 'eye-off-outline'} size={20} color={theme.icon} />
+                    </Pressable>
+                  </View>
+
+                  <Text style={styles.forgotInputLabel}>Confirm Password</Text>
+                  <View style={[styles.forgotInputWrap, forgotError && styles.forgotInputError]}>
+                    <Icon name="lock-check-outline" size={20} color={theme.icon} />
+                    <TextInput
+                      value={forgotConfirm}
+                      onChangeText={text => { setForgotConfirm(text); setForgotError(''); }}
+                      placeholder="Re-enter password"
+                      placeholderTextColor="#a7b3ba"
+                      secureTextEntry={!showForgotConfirm}
+                      autoCapitalize="none"
+                      style={styles.forgotInput}
+                    />
+                    <Pressable onPress={() => setShowForgotConfirm(v => !v)} hitSlop={8}>
+                      <Icon name={showForgotConfirm ? 'eye-outline' : 'eye-off-outline'} size={20} color={theme.icon} />
+                    </Pressable>
+                  </View>
+                </>
+              ) : null}
+
+              {forgotError ? (
+                <View style={[styles.forgotMsg, styles.forgotMsgError]}>
+                  <Icon name="alert-circle-outline" size={17} color="#dc2626" />
+                  <Text style={styles.forgotMsgErrorText}>{forgotError}</Text>
+                </View>
+              ) : null}
+              {forgotInfo && !forgotError ? (
+                <View style={[styles.forgotMsg, styles.forgotMsgInfo]}>
+                  <Icon name="check-circle-outline" size={17} color="#047857" />
+                  <Text style={styles.forgotMsgInfoText}>{forgotInfo}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.forgotActions}>
+                <Pressable style={styles.forgotSecondary} onPress={closeForgot} disabled={forgotLoading}>
+                  <Text style={styles.forgotSecondaryText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[styles.forgotPrimary, forgotLoading && styles.forgotDisabled]} onPress={forgotAction} disabled={forgotLoading}>
+                  {forgotLoading ? <ActivityIndicator color="#fff" size="small" /> : null}
+                  <Text style={styles.forgotPrimaryText}>{forgotActionText}</Text>
+                </Pressable>
+              </View>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Help / contact admin popup */}
       <Modal visible={helpOpen} transparent animationType="fade" onRequestClose={() => setHelpOpen(false)}>
@@ -237,6 +491,61 @@ const styles = StyleSheet.create({
 
   flexSpacer: { flexGrow: 1, minHeight: 24 },
   footer: { color: theme.muted, fontSize: 14, fontStyle: 'italic', textAlign: 'center', marginTop: 16 },
+
+  // Forgot password popup
+  forgotBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(15,23,42,0.58)', padding: 18 },
+  forgotCard: {
+    width: '100%', maxWidth: 430, backgroundColor: '#fff', borderRadius: 22, overflow: 'hidden',
+    shadowColor: '#0f172a', shadowOpacity: 0.25, shadowRadius: 28, shadowOffset: { width: 0, height: 18 }, elevation: 10,
+  },
+  forgotHeader: {
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12,
+    paddingHorizontal: 20, paddingVertical: 20, backgroundColor: '#f5f8ff', borderBottomWidth: 1, borderBottomColor: '#e3e9f2',
+  },
+  forgotHeaderLeft: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 13 },
+  forgotIcon: {
+    width: 50, height: 50, borderRadius: 15, backgroundColor: theme.teal,
+    alignItems: 'center', justifyContent: 'center', shadowColor: theme.tealDark,
+    shadowOpacity: 0.3, shadowRadius: 14, shadowOffset: { width: 0, height: 8 }, elevation: 4,
+  },
+  forgotTitleWrap: { flex: 1 },
+  forgotTitle: { color: '#0f172a', fontSize: 18, fontWeight: '900' },
+  forgotSub: { color: '#64748b', fontSize: 12.8, lineHeight: 19, marginTop: 5 },
+  forgotClose: {
+    width: 34, height: 34, borderRadius: 11, backgroundColor: '#fff',
+    alignItems: 'center', justifyContent: 'center', shadowColor: '#0f172a',
+    shadowOpacity: 0.08, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 1,
+  },
+  forgotBody: { padding: 20, gap: 13 },
+  forgotSteps: { flexDirection: 'row', gap: 7, marginBottom: 2 },
+  forgotStepBar: { flex: 1, height: 4, borderRadius: 99, backgroundColor: '#e2e8f0' },
+  forgotStepOn: { backgroundColor: theme.teal },
+  forgotInputLabel: { color: '#64748b', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', marginBottom: -5 },
+  forgotInputWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 52,
+    backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#dfe7ef',
+    borderRadius: 13, paddingHorizontal: 14,
+  },
+  forgotInputError: { borderColor: '#fca5a5', backgroundColor: '#fffafa' },
+  forgotInput: { flex: 1, color: '#0f172a', fontSize: 15, paddingVertical: 0 },
+  forgotMsg: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 11, borderRadius: 11 },
+  forgotMsgError: { backgroundColor: '#fff1f2', borderWidth: 1, borderColor: '#fecdd3' },
+  forgotMsgInfo: { backgroundColor: '#ecfdf5', borderWidth: 1, borderColor: '#a7f3d0' },
+  forgotMsgErrorText: { flex: 1, color: '#dc2626', fontSize: 12.8, fontWeight: '700', lineHeight: 18 },
+  forgotMsgInfoText: { flex: 1, color: '#047857', fontSize: 12.8, fontWeight: '700', lineHeight: 18 },
+  forgotActions: { flexDirection: 'row', gap: 10, marginTop: 2 },
+  forgotSecondary: {
+    flex: 1, height: 48, borderRadius: 12, borderWidth: 1.5, borderColor: '#dfe7ef',
+    alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff',
+  },
+  forgotSecondaryText: { color: '#64748b', fontSize: 13, fontWeight: '800' },
+  forgotPrimary: {
+    flex: 2, height: 48, borderRadius: 12, backgroundColor: theme.teal,
+    alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8,
+    shadowColor: theme.tealDark, shadowOpacity: 0.24, shadowRadius: 12, shadowOffset: { width: 0, height: 7 }, elevation: 3,
+  },
+  forgotDisabled: { opacity: 0.65 },
+  forgotPrimaryText: { color: '#fff', fontSize: 13, fontWeight: '900' },
 
   // Help popup
   helpBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(15,30,32,0.55)', padding: 28 },

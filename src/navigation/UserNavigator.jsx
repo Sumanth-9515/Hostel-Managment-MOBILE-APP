@@ -18,6 +18,8 @@ import AutoMailSettingsScreen from '../screens/user/AutoMailSettingsScreen';
 import ProfileScreen from '../screens/user/ProfileScreen';
 import OwnerSearchScreen from '../screens/user/OwnerSearchScreen';
 import PrivacyPolicyScreen from '../screens/user/PrivacyPolicyScreen';
+import PaymentRequestsScreen from '../screens/user/PaymentRequestsScreen';
+import NotificationsScreen from '../screens/user/NotificationsScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -48,6 +50,8 @@ export default function UserNavigator({ onLogout, onUserUpdate, user }) {
           <Stack.Screen name="RevenueOverview">{props => <RevenueOverviewScreen {...props} onLogout={onLogout} />}</Stack.Screen>
           <Stack.Screen name="Overview">{props => <OverviewScreen {...props} onLogout={onLogout} />}</Stack.Screen>
           <Stack.Screen name="ActivityLogs">{props => <ActivityLogsScreen {...props} onLogout={onLogout} />}</Stack.Screen>
+          <Stack.Screen name="PaymentRequests">{props => <PaymentRequestsScreen {...props} onLogout={onLogout} />}</Stack.Screen>
+          <Stack.Screen name="Notifications" component={NotificationsScreen} />
           <Stack.Screen name="Profile">{props => <ProfileScreen {...props} onLogout={onLogout} onUserUpdate={onUserUpdate} />}</Stack.Screen>
           <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
         </Stack.Navigator>

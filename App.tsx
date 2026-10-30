@@ -6,6 +6,7 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { ToastProvider } from './src/components/AppToast';
 import { colors } from './src/utils/constants';
 import NetworkStatusMonitor from './src/network/NetworkStatusMonitor';
+import { AppUpdateProvider } from './src/updates/AppUpdateProvider';
 
 declare const process: { env?: { JEST_WORKER_ID?: string } };
 
@@ -75,8 +76,10 @@ export default function App() {
         </View>
       ) : (
         <ToastProvider>
-          <NetworkStatusMonitor />
-          <AppNavigator />
+          <AppUpdateProvider>
+            <NetworkStatusMonitor />
+            <AppNavigator />
+          </AppUpdateProvider>
         </ToastProvider>
       )}
     </SafeAreaProvider>

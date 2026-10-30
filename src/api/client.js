@@ -142,10 +142,6 @@ api.interceptors.response.use(
   async error => {
     clearRequestMetadata(error?.config);
 
-    if (error?.response?.status === 401) {
-      await session.clear({ notify: true });
-    }
-
     const config = error?.config || {};
     if (error?.code === 'ERR_CANCELED' || axios.isCancel?.(error)) {
       return Promise.reject(error);

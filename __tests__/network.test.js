@@ -10,11 +10,12 @@ import {
   configureNetworkNotifier,
   notifyNetworkIssue,
 } from '../src/network/networkFeedback';
-import {
+import api, {
   createNetworkError,
   isRetryableNetworkError,
   isSafeBaseUrl,
 } from '../src/api/client';
+import { session } from '../src/storage/session';
 import { isTemporaryNetworkFailure } from '../src/api/apiHelpers';
 import { getMessage } from '../src/utils/helpers';
 
@@ -92,5 +93,23 @@ describe('network request helpers', () => {
     expect(getMessage(timeout)).toBe('Slow internet connection. Please check your connectivity.');
     expect(isRetryableNetworkError(timeout)).toBe(true);
     expect(isTemporaryNetworkFailure(timeout)).toBe(true);
+  });
+
+  it('does not clear the signed-in session when an optional API returns 401', async () => {
+    const clearSession = jest.spyOn(session, 'clear').mockResolvedValue();
+    const unauthorized = {
+      response: { status: 401 },
+      message: 'Unauthorized',
+    };
+
+    await expect(api.get('/optional-background-request', {
+      skipConnectivityCheck: true,
+      cancelPrevious: false,
+      retry: false,
+      adapter: config => Promise.reject({ ...unauthorized, config }),
+    })).rejects.toMatchObject({ response: { status: 401 } });
+
+    expect(clearSession).not.toHaveBeenCalled();
+    clearSession.mockRestore();
   });
 });

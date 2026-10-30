@@ -17,6 +17,7 @@ import { tenantApi } from '../../api/tenantApi';
 import { colors } from '../../utils/constants';
 import { registerCacheReset } from '../../utils/cacheRegistry';
 import { advancePendingFor, compactLocation, dateText, getMessage, money } from '../../utils/helpers';
+import { accumulatedDueFor, currentDueFor, isUpcomingRent, rentDisplayStatus, upcomingAmountFor } from '../../utils/rentCompatibility';
 
 const tenantDetailCache = new Map();
 
@@ -47,6 +48,25 @@ const paymentsForRecord = record =>
     : Array.isArray(record?.paymentHistory)
       ? record.paymentHistory
       : [];
+
+const monthStart = value => {
+  if (!value) return null;
+  const text = String(value);
+  const monthMatch = text.match(/^(\d{4})[-/](\d{1,2})/);
+  const date = monthMatch ? new Date(Number(monthMatch[1]), Number(monthMatch[2]) - 1, 1) : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+};
+
+const historyAfterJoining = (history, joiningDate) => {
+  const joiningMonth = monthStart(joiningDate);
+  const records = Array.isArray(history) ? history : [];
+  if (!joiningMonth) return records;
+  return records.filter(record => {
+    const recordMonth = monthStart(record?.dueDate || record?.monthYear);
+    return !recordMonth || recordMonth >= joiningMonth;
+  });
+};
 
 const statusTone = {
   Paid: { fg: colors.success, bg: colors.successSoft },
@@ -439,6 +459,9 @@ export default function TenantDetailsScreen({ navigation, route }) {
   const advanceExpected = Number(t?.advanceAmount || 0);
   const advancePaid = Number(t?.paidAdvanceAmount ?? t?.paidadvanceAmount ?? 0);
   const advancePending = t ? advancePendingFor({ tenant: t }) : 0;
+  const currentDue = currentDueFor(detail);
+  const upcomingAmount = upcomingAmountFor(detail);
+  const visibleHistory = useMemo(() => historyAfterJoining(detail?.history, t?.joiningDate), [detail?.history, t?.joiningDate]);
 
   return (
     <View style={styles.screen}>
@@ -547,7 +570,7 @@ export default function TenantDetailsScreen({ navigation, route }) {
                       <Info label="Monthly rent" value={money(t.rentAmount || 0)} accent />
                       <Info label="Father's name" value={t.fatherName} />
                       <PhoneInfo label="Father's phone" value={t.fatherPhone} />
-                      <Info label="Current status" value={current?.status || 'No record'} />
+                      <Info label="Current status" value={current ? rentDisplayStatus(detail) : 'No record'} />
                       <Info label="Tenant status" value={t.status} />
                     </View>
                     <Info label="Permanent address" value={t.permanentAddress} />
@@ -557,11 +580,15 @@ export default function TenantDetailsScreen({ navigation, route }) {
                   {/* Advance + dues */}
                   <AppCard>
                     <Text style={styles.section}>Financials</Text>
+                    {isUpcomingRent(detail) ? <Text style={styles.upcomingBadge}>Upcoming</Text> : null}
                     <View style={styles.grid}>
                       <Info label="Advance expected" value={money(advanceExpected)} />
                       <Info label="Advance paid" value={money(advancePaid)} />
                       <Info label="Advance pending" value={money(advancePending)} accent={advancePending > 0} />
-                      <Info label="Total due" value={money(detail.totalAccumulatedDue || 0)} accent />
+                      <Info label="Arrears" value={money(detail.arrearsTotal || 0)} accent={Number(detail.arrearsTotal || 0) > 0} />
+                      <Info label="Currently due" value={money(currentDue)} accent={currentDue > 0} />
+                      <Info label="Upcoming rent" value={money(upcomingAmount)} accent={upcomingAmount > 0} />
+                      <Info label="Total accumulated due" value={money(accumulatedDueFor(detail))} accent />
                     </View>
                     {detail.hasPreviousPending ? (
                       <View style={styles.arrears}>
@@ -590,7 +617,7 @@ export default function TenantDetailsScreen({ navigation, route }) {
                   {/* Payment history with correction */}
                   <AppCard>
                     <Text style={styles.section}>Payment history</Text>
-                    {(detail.history || []).length ? detail.history.map((record, index) => (
+                    {visibleHistory.length ? visibleHistory.map((record, index) => (
                       <View style={styles.history} key={`${record.monthYear}-${index}`}>
                         <View style={styles.flex}>
                           <Text style={styles.historyMonth}>{monthText(record.dueDate)}</Text>
@@ -708,6 +735,7 @@ const styles = StyleSheet.create({
   footer: { height: 40 },
   muted: { fontSize: 12, color: colors.muted, marginTop: 3 },
   section: { fontSize: 12, color: colors.muted, fontWeight: '800', textTransform: 'uppercase', marginBottom: 10 },
+  upcomingBadge: { alignSelf: 'flex-start', color: colors.info, backgroundColor: colors.infoSoft, fontSize: 11, fontWeight: '800', paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8, overflow: 'hidden', marginBottom: 9 },
 
   hero: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   heroPhoto: { width: 60, height: 60, borderRadius: 16 },
